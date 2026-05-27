@@ -1,0 +1,190 @@
+{
+  "benchmark_id": "qa_smoke_zh_en",
+  "display_name": "QA Smoke 中英混合",
+  "version": "2026-05-25",
+  "description": "Small bilingual QA set for first-pass on-device LLM benchmarking.",
+  "default_max_new_tokens": 96,
+  "items": [
+    {
+      "id": "zh_common_001",
+      "language": "zh",
+      "category": "common_knowledge",
+      "prompt": "中国的首都是哪里？请只回答城市名。",
+      "expected_answer": "北京",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "zh_phone_001",
+      "language": "zh",
+      "category": "phone_usage",
+      "prompt": "手机电量只剩5%并且马上要出门，应该优先做哪两件事？",
+      "expected_answer": "省电,充电",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 96
+    },
+    {
+      "id": "zh_reason_001",
+      "language": "zh",
+      "category": "reasoning",
+      "prompt": "一个盒子里有3个红球和2个蓝球，一共有几个球？请给出数字。",
+      "expected_answer": "5",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "zh_instruction_001",
+      "language": "zh",
+      "category": "instruction_following",
+      "prompt": "把“今天手机运行很流畅”改写成更正式的一句话。",
+      "expected_answer": "手机,流畅",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 80
+    },
+    {
+      "id": "zh_math_001",
+      "language": "zh",
+      "category": "math",
+      "prompt": "12乘以8等于多少？只回答数字。",
+      "expected_answer": "96",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "zh_summary_001",
+      "language": "zh",
+      "category": "summary",
+      "prompt": "用一句话总结：小米17连接USB后，可以用ADB安装测试应用并拉取报告。",
+      "expected_answer": "ADB,报告",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 64
+    },
+    {
+      "id": "zh_safety_001",
+      "language": "zh",
+      "category": "safety",
+      "prompt": "如果手机在跑模型时明显发热，应该继续长时间测试还是暂停降温？请简短回答。",
+      "expected_answer": "暂停",
+      "judge_rule": "contains",
+      "max_new_tokens": 48
+    },
+    {
+      "id": "zh_fact_001",
+      "language": "zh",
+      "category": "fact",
+      "prompt": "一年通常有多少个月？只回答数字。",
+      "expected_answer": "12",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "zh_logic_001",
+      "language": "zh",
+      "category": "logic",
+      "prompt": "如果所有A都是B，且小明是A，那么小明是不是B？只回答是或不是。",
+      "expected_answer": "是",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "zh_short_001",
+      "language": "zh",
+      "category": "short_answer",
+      "prompt": "请列出两个常见的手机性能指标。",
+      "expected_answer": "延迟,吞吐",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 64
+    },
+    {
+      "id": "en_common_001",
+      "language": "en",
+      "category": "common_knowledge",
+      "prompt": "What is the capital of France? Answer with the city name only.",
+      "expected_answer": "Paris",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "en_math_001",
+      "language": "en",
+      "category": "math",
+      "prompt": "What is 9 plus 14? Answer with only the number.",
+      "expected_answer": "23",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "en_reason_001",
+      "language": "en",
+      "category": "reasoning",
+      "prompt": "A phone benchmark runs 3 prompts in the morning and 4 at night. How many prompts ran in total?",
+      "expected_answer": "7",
+      "judge_rule": "contains",
+      "max_new_tokens": 48
+    },
+    {
+      "id": "en_instruction_001",
+      "language": "en",
+      "category": "instruction_following",
+      "prompt": "Rewrite this sentence in a more formal style: the phone is really fast today.",
+      "expected_answer": "phone,fast",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 80
+    },
+    {
+      "id": "en_device_001",
+      "language": "en",
+      "category": "device",
+      "prompt": "Name one metric that is useful for measuring LLM performance on a phone.",
+      "expected_answer": "latency,tokens",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 64
+    },
+    {
+      "id": "en_fact_001",
+      "language": "en",
+      "category": "fact",
+      "prompt": "How many days are in a standard week? Answer with only the number.",
+      "expected_answer": "7",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "en_safety_001",
+      "language": "en",
+      "category": "safety",
+      "prompt": "If a phone becomes very hot during a long benchmark, should you pause the test or keep pushing it?",
+      "expected_answer": "pause",
+      "judge_rule": "contains",
+      "max_new_tokens": 48
+    },
+    {
+      "id": "en_summary_001",
+      "language": "en",
+      "category": "summary",
+      "prompt": "Summarize in one sentence: The app downloads a model, runs QA prompts, and exports benchmark reports.",
+      "expected_answer": "downloads,runs,exports",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 64
+    },
+    {
+      "id": "en_logic_001",
+      "language": "en",
+      "category": "logic",
+      "prompt": "If every tablet is a device and this tablet is on the desk, is it a device? Answer yes or no.",
+      "expected_answer": "yes",
+      "judge_rule": "contains",
+      "max_new_tokens": 32
+    },
+    {
+      "id": "en_short_001",
+      "language": "en",
+      "category": "short_answer",
+      "prompt": "Give two short tips for preserving phone battery during testing.",
+      "expected_answer": "brightness,background",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 64
+    }
+  ]
+}
+

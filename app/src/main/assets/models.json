@@ -1,0 +1,32 @@
+{
+  "models": [
+    {
+      "model_id": "Qwen3-1.7B-q4f16_1-MLC",
+      "display_name": "Qwen3 1.7B Instruct q4f16_1",
+      "mlc_model_url": "HF://mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
+      "model_lib": "qwen3_q4f16_1_1431bce2f7643ad37bb21ddc71153223",
+      "quantization": "q4f16_1",
+      "context_window": 2048,
+      "estimated_vram_bytes": 3000000000,
+      "default_params": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 128
+      }
+    },
+    {
+      "model_id": "Qwen3-0.6B-q0f16-MLC",
+      "display_name": "Qwen3 0.6B q0f16",
+      "mlc_model_url": "HF://mlc-ai/Qwen3-0.6B-q0f16-MLC",
+      "model_lib": "qwen3_q0f16_e709b04052d95e24b38d40e4259e1f14",
+      "quantization": "q0f16",
+      "context_window": 2048,
+      "estimated_vram_bytes": 3000000000,
+      "default_params": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "max_tokens": 128
+      }
+    }
+  ]
+}

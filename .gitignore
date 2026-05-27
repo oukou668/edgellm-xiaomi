@@ -1,0 +1,14 @@
+.gradle/
+build/
+app/build/
+app/libs/
+app/src/main/jniLibs/
+app/src/main/assets/mlc/
+local.properties
+reports/
+mlc/package/
+vendor/
+*.iml
+.DS_Store
+__pycache__/
+*.pyc

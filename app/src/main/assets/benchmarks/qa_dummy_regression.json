@@ -1,0 +1,19 @@
+{
+  "benchmark_id": "qa_dummy_regression",
+  "display_name": "QA Dummy Regression",
+  "version": "2026-05-25",
+  "description": "Tiny dataset used to verify registry extensibility.",
+  "default_max_new_tokens": 32,
+  "items": [
+    {
+      "id": "dummy_001",
+      "language": "en",
+      "category": "registry",
+      "prompt": "Answer with the word ready.",
+      "expected_answer": "ready",
+      "judge_rule": "contains",
+      "max_new_tokens": 16
+    }
+  ]
+}
+
