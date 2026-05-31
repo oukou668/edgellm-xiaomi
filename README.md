@@ -67,8 +67,20 @@ BENCHMARK_ID=qa_complex_stress \
 ./scripts/run_benchmark_adb.sh
 ```
 
-The app writes each run to its sandbox under `files/reports/<timestamp>_<benchmark_id>/`
-with `report.json`, `report.csv`, and `report.md`.
+By default the script keeps the device awake while plugged in, starts the app,
+waits for the selected benchmark report, pulls the report archive, extracts it
+under `reports/extracted`, and prints the Markdown summary. The app writes each
+run to its sandbox under `files/reports/<timestamp>_<benchmark_id>/` with
+`report.json`, `report.csv`, and `report.md`.
+
+Useful overrides:
+
+```bash
+WAIT=0 ./scripts/run_benchmark_adb.sh          # start only
+PULL=0 ./scripts/run_benchmark_adb.sh          # wait but do not pull reports
+TIMEOUT_SECONDS=1800 ./scripts/run_benchmark_adb.sh
+STAY_AWAKE=0 ./scripts/run_benchmark_adb.sh
+```
 
 ## Benchmark And Hardware Metrics
 
