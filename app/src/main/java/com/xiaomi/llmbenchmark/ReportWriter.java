@@ -30,18 +30,25 @@ final class ReportWriter {
     private static String toCsv(BenchmarkRunReport report) {
         StringBuilder builder = new StringBuilder();
         builder.append(
-                "id,language,category,passed,error,first_token_latency_ms,total_latency_ms,estimated_output_tokens,decode_tokens_per_second,prompt,expected_answer,output\n");
+                "id,language,category,difficulty,tags,passed,error,first_token_latency_ms,total_latency_ms,estimated_output_tokens,decode_tokens_per_second,peak_app_pss_bytes,peak_system_memory_used_ratio,peak_battery_temperature_c,peak_thermal_temperature_c,prompt,expected_answer,output\n");
         for (BenchmarkItemResult result : report.results) {
+            HardwareSummary hardware = new HardwareSummary(result.hardwareSamples);
             builder.append(csv(result.item.id)).append(',');
             builder.append(csv(result.item.language)).append(',');
             builder.append(csv(result.item.category)).append(',');
+            builder.append(csv(result.item.difficulty)).append(',');
+            builder.append(csv(String.join(";", result.item.tags))).append(',');
             builder.append(result.passed).append(',');
             builder.append(csv(result.error)).append(',');
             builder.append(result.firstTokenLatencyMs).append(',');
             builder.append(result.totalLatencyMs).append(',');
             builder.append(result.estimatedOutputTokens).append(',');
             builder.append(String.format(Locale.US, "%.3f", result.decodeTokensPerSecond)).append(',');
-            builder.append(csv(result.item.prompt)).append(',');
+            builder.append(hardware.peakAppPssBytes).append(',');
+            builder.append(String.format(Locale.US, "%.4f", hardware.peakSystemMemoryUsedRatio)).append(',');
+            builder.append(formatDouble(hardware.peakBatteryTempC)).append(',');
+            builder.append(formatDouble(hardware.peakThermalTempC)).append(',');
+            builder.append(csv(result.item.displayPrompt())).append(',');
             builder.append(csv(result.item.expectedAnswer)).append(',');
             builder.append(csv(result.output)).append('\n');
         }
@@ -60,20 +67,38 @@ final class ReportWriter {
         builder.append("- Failed items: ").append(report.failureCount()).append('\n');
         builder.append("- Avg decode tokens/s: ")
                 .append(String.format(Locale.US, "%.2f", report.averageTokensPerSecond()))
+                .append('\n');
+        HardwareSummary runHardware = new HardwareSummary(report.hardwareSamples);
+        builder.append("- Hardware samples: ").append(runHardware.sampleCount).append('\n');
+        builder.append("- Peak app PSS: ").append(formatBytes(runHardware.peakAppPssBytes)).append('\n');
+        builder.append("- Peak system memory used: ")
+                .append(String.format(Locale.US, "%.1f%%", runHardware.peakSystemMemoryUsedRatio * 100.0))
+                .append('\n');
+        builder.append("- Peak battery temp: ").append(formatTemperature(runHardware.peakBatteryTempC)).append('\n');
+        builder.append("- Peak thermal temp: ")
+                .append(formatTemperature(runHardware.peakThermalTempC))
+                .append(runHardware.peakThermalZone.isEmpty() ? "" : " (`" + escapeMd(runHardware.peakThermalZone) + "`)")
                 .append("\n\n");
-        builder.append("| ID | Pass | First token ms | Total ms | tok/s | Output |\n");
-        builder.append("| --- | --- | ---: | ---: | ---: | --- |\n");
+        builder.append("| ID | Pass | Difficulty | First token ms | Total ms | tok/s | Peak PSS | Peak temp | Output |\n");
+        builder.append("| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | --- |\n");
         for (BenchmarkItemResult result : report.results) {
+            HardwareSummary hardware = new HardwareSummary(result.hardwareSamples);
             builder.append("| ")
                     .append(escapeMd(result.item.id))
                     .append(" | ")
                     .append(result.passed ? "yes" : "no")
+                    .append(" | ")
+                    .append(escapeMd(result.item.difficulty))
                     .append(" | ")
                     .append(result.firstTokenLatencyMs)
                     .append(" | ")
                     .append(result.totalLatencyMs)
                     .append(" | ")
                     .append(String.format(Locale.US, "%.2f", result.decodeTokensPerSecond))
+                    .append(" | ")
+                    .append(formatBytes(hardware.peakAppPssBytes))
+                    .append(" | ")
+                    .append(formatTemperature(hardware.peakThermalTempC))
                     .append(" | ")
                     .append(escapeMd(shorten(result.output.isEmpty() ? result.error : result.output, 120)))
                     .append(" |\n");
@@ -102,5 +127,22 @@ final class ReportWriter {
         }
         return value.substring(0, max - 3) + "...";
     }
-}
 
+    private static String formatBytes(long bytes) {
+        if (bytes <= 0L) {
+            return "n/a";
+        }
+        return String.format(Locale.US, "%.1f MiB", bytes / 1024.0 / 1024.0);
+    }
+
+    private static String formatTemperature(double temperatureC) {
+        if (Double.isNaN(temperatureC)) {
+            return "n/a";
+        }
+        return String.format(Locale.US, "%.1f C", temperatureC);
+    }
+
+    private static String formatDouble(double value) {
+        return Double.isNaN(value) ? "" : String.format(Locale.US, "%.3f", value);
+    }
+}

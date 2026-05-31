@@ -1,6 +1,7 @@
 package com.xiaomi.llmbenchmark;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -19,6 +20,10 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
+    private static final String EXTRA_AUTORUN = "autorun";
+    private static final String EXTRA_MODEL_ID = "model_id";
+    private static final String EXTRA_BENCHMARK_ID = "benchmark_id";
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
@@ -36,6 +41,13 @@ public final class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(createContentView());
         loadRegistries();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        maybeAutorun(intent);
     }
 
     @Override
@@ -115,6 +127,7 @@ public final class MainActivity extends Activity {
             benchmarkSpinner.setAdapter(
                     new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, benchmarks));
             statusView.setText("Ready. Models: " + models.size() + ", benchmarks: " + benchmarks.size());
+            maybeAutorun(getIntent());
         } catch (Exception error) {
             statusView.setText("Registry load failed: " + error.getMessage());
             runButton.setEnabled(false);
@@ -128,7 +141,10 @@ public final class MainActivity extends Activity {
         }
         ModelConfig model = (ModelConfig) modelSpinner.getSelectedItem();
         BenchmarkConfig benchmark = (BenchmarkConfig) benchmarkSpinner.getSelectedItem();
+        runBenchmark(model, benchmark);
+    }
 
+    private void runBenchmark(ModelConfig model, BenchmarkConfig benchmark) {
         runButton.setEnabled(false);
         progressBar.setVisibility(View.VISIBLE);
         logView.setText("");
@@ -162,6 +178,50 @@ public final class MainActivity extends Activity {
                                 });
                     }
                 });
+    }
+
+    private void maybeAutorun(Intent intent) {
+        if (intent == null || !intent.getBooleanExtra(EXTRA_AUTORUN, false)) {
+            return;
+        }
+        if (models == null || benchmarks == null || models.isEmpty() || benchmarks.isEmpty()) {
+            return;
+        }
+        if (!runButton.isEnabled()) {
+            return;
+        }
+        String requestedModelId = intent.getStringExtra(EXTRA_MODEL_ID);
+        String requestedBenchmarkId = intent.getStringExtra(EXTRA_BENCHMARK_ID);
+        ModelConfig model = findModel(requestedModelId);
+        BenchmarkConfig benchmark = findBenchmark(requestedBenchmarkId);
+        modelSpinner.setSelection(models.indexOf(model));
+        benchmarkSpinner.setSelection(benchmarks.indexOf(benchmark));
+        statusView.setText("Autorun requested: " + benchmark.benchmarkId);
+        mainHandler.post(() -> runBenchmark(model, benchmark));
+    }
+
+    private ModelConfig findModel(String modelId) {
+        if (modelId != null && !modelId.isEmpty()) {
+            for (ModelConfig model : models) {
+                if (modelId.equals(model.modelId)) {
+                    return model;
+                }
+            }
+            appendLog("Requested model not found, using first model: " + modelId);
+        }
+        return models.get(0);
+    }
+
+    private BenchmarkConfig findBenchmark(String benchmarkId) {
+        if (benchmarkId != null && !benchmarkId.isEmpty()) {
+            for (BenchmarkConfig benchmark : benchmarks) {
+                if (benchmarkId.equals(benchmark.benchmarkId)) {
+                    return benchmark;
+                }
+            }
+            appendLog("Requested benchmark not found, using first benchmark: " + benchmarkId);
+        }
+        return benchmarks.get(0);
     }
 
     private void appendLog(String message) {

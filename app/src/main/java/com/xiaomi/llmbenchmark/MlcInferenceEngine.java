@@ -15,6 +15,7 @@ final class MlcInferenceEngine implements InferenceEngine {
     private Object engine;
     private Method reload;
     private Method chatCompletion;
+    private Method reset;
     private Method unload;
     private final LinkedBlockingQueue<String> streamEvents = new LinkedBlockingQueue<>();
 
@@ -28,6 +29,7 @@ final class MlcInferenceEngine implements InferenceEngine {
         Method initBackgroundEngine = engineClass.getMethod("initBackgroundEngine", callbackClass);
         reload = engineClass.getMethod("reload", String.class);
         chatCompletion = engineClass.getMethod("chatCompletion", String.class, String.class);
+        reset = engineClass.getMethod("reset");
         unload = engineClass.getMethod("unload");
         Method runBackgroundLoop = engineClass.getMethod("runBackgroundLoop");
         Method runBackgroundStreamBackLoop = engineClass.getMethod("runBackgroundStreamBackLoop");
@@ -57,19 +59,20 @@ final class MlcInferenceEngine implements InferenceEngine {
     }
 
     @Override
-    public GenerationResult generate(String prompt, GenerationParams params, int maxNewTokens) throws Exception {
+    public GenerationResult generate(BenchmarkItem item, GenerationParams params) throws Exception {
         if (engine == null) {
             throw new IllegalStateException("MLC engine is not loaded.");
         }
 
         streamEvents.clear();
+        reset.invoke(engine);
         String requestId = UUID.randomUUID().toString();
         JSONObject request = new JSONObject();
         request.put("model", "local");
         request.put("stream", true);
         request.put("temperature", params.temperature);
         request.put("top_p", params.topP);
-        request.put("max_tokens", maxNewTokens);
+        request.put("max_tokens", item.maxNewTokens);
         JSONArray messages = new JSONArray();
         messages.put(
                 new JSONObject()
@@ -78,7 +81,13 @@ final class MlcInferenceEngine implements InferenceEngine {
                                 "content",
                                 "You are running inside a benchmark. Do not reveal chain-of-thought. "
                                         + "Do not include <think> sections. Return only the final answer."));
-        messages.put(new JSONObject().put("role", "user").put("content", prompt + "\n/no_think"));
+        for (BenchmarkMessage message : item.messages) {
+            String content = message.content;
+            if ("user".equals(message.role)) {
+                content = content + "\n/no_think";
+            }
+            messages.put(new JSONObject().put("role", message.role).put("content", content));
+        }
         request.put("messages", messages);
 
         long startNs = System.nanoTime();
@@ -86,13 +95,15 @@ final class MlcInferenceEngine implements InferenceEngine {
         StringBuilder text = new StringBuilder();
         chatCompletion.invoke(engine, request.toString(), requestId);
 
-        long deadlineNs = startNs + TimeUnit.SECONDS.toNanos(75);
+        long timeoutSeconds = Math.max(180L, item.maxNewTokens * 2L);
+        long deadlineNs = startNs + TimeUnit.SECONDS.toNanos(timeoutSeconds);
+        boolean finished = false;
         while (System.nanoTime() < deadlineNs) {
             String event = streamEvents.poll(250, TimeUnit.MILLISECONDS);
             if (event == null) {
                 continue;
             }
-            ParsedStreamEvent parsed = parseStreamEvent(event);
+            ParsedStreamEvent parsed = parseStreamEvent(event, requestId);
             if (!parsed.content.isEmpty()) {
                 if (firstTokenNs == 0L) {
                     firstTokenNs = System.nanoTime();
@@ -100,11 +111,19 @@ final class MlcInferenceEngine implements InferenceEngine {
                 text.append(parsed.content);
             }
             if (parsed.finished) {
+                finished = true;
                 break;
             }
         }
 
         long endNs = System.nanoTime();
+        if (!finished) {
+            try {
+                reset.invoke(engine);
+            } catch (Exception ignored) {
+            }
+            throw new IllegalStateException("MLC generation timed out after " + timeoutSeconds + " seconds.");
+        }
         return new GenerationResult(
                 text.toString(),
                 firstTokenNs == 0L ? -1L : TimeUnit.NANOSECONDS.toMillis(firstTokenNs - startNs),
@@ -122,30 +141,34 @@ final class MlcInferenceEngine implements InferenceEngine {
         }
     }
 
-    private static ParsedStreamEvent parseStreamEvent(String event) {
+    private static ParsedStreamEvent parseStreamEvent(String event, String requestId) {
         try {
             if (event.trim().startsWith("[")) {
                 JSONArray events = new JSONArray(event);
                 StringBuilder content = new StringBuilder();
                 boolean finished = false;
                 for (int i = 0; i < events.length(); i++) {
-                    ParsedStreamEvent parsed = parseStreamObject(events.optJSONObject(i));
+                    ParsedStreamEvent parsed = parseStreamObject(events.optJSONObject(i), requestId);
                     content.append(parsed.content);
                     finished = finished || parsed.finished;
                 }
                 return new ParsedStreamEvent(content.toString(), finished);
             }
-            return parseStreamObject(new JSONObject(event));
+            return parseStreamObject(new JSONObject(event), requestId);
         } catch (Exception ignored) {
             return new ParsedStreamEvent(event, false);
         }
     }
 
-    private static ParsedStreamEvent parseStreamObject(JSONObject root) {
+    private static ParsedStreamEvent parseStreamObject(JSONObject root, String requestId) {
         if (root == null) {
             return new ParsedStreamEvent("", false);
         }
         try {
+            String responseId = root.optString("id", "");
+            if (!responseId.isEmpty() && !responseId.equals(requestId)) {
+                return new ParsedStreamEvent("", false);
+            }
             if (!root.isNull("usage")) {
                 return new ParsedStreamEvent("", true);
             }

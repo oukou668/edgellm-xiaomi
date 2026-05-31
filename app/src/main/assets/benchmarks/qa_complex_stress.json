@@ -1,0 +1,114 @@
+{
+  "benchmark_id": "qa_complex_stress",
+  "display_name": "QA Complex Stress 中英复杂",
+  "version": "2026-05-31",
+  "description": "Longer bilingual benchmark with multi-turn messages, context grounding, arithmetic, summarization, and device-operation tasks.",
+  "default_max_new_tokens": 256,
+  "hardware_sample_interval_ms": 500,
+  "items": [
+    {
+      "id": "complex_zh_context_001",
+      "language": "zh",
+      "category": "context_grounding",
+      "difficulty": "medium",
+      "tags": ["long_context", "retrieval"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "阅读材料：小米17通过USB连接电脑后，测试人员使用ADB安装debug APK，首次运行会下载MLC模型权重，运行QA benchmark后报告会保存在app私有目录。问题：报告默认保存在哪里？请简短回答。"
+        }
+      ],
+      "expected_answer": "app私有目录,私有目录",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 256
+    },
+    {
+      "id": "complex_zh_reason_001",
+      "language": "zh",
+      "category": "multi_step_reasoning",
+      "difficulty": "hard",
+      "tags": ["math", "multi_step"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "一次手机LLM测试上午跑了12条prompt，下午跑了18条prompt，其中有5条失败。请计算成功条数，并只给出数字。"
+        }
+      ],
+      "expected_answer": "25",
+      "judge_rule": "contains",
+      "max_new_tokens": 192
+    },
+    {
+      "id": "complex_zh_summary_001",
+      "language": "zh",
+      "category": "summary",
+      "difficulty": "medium",
+      "tags": ["summarization", "reporting"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "将下面内容总结成不超过40个字：本次测试使用小米17和MLC LLM框架，模型为Qwen小模型，benchmark包含中英QA，报告记录首token延迟、总耗时、tokens/s、内存占用和温度。"
+        }
+      ],
+      "expected_answer": "小米17,MLC,Qwen,报告",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 192
+    },
+    {
+      "id": "complex_en_multiturn_001",
+      "language": "en",
+      "category": "multi_turn",
+      "difficulty": "hard",
+      "tags": ["multi_turn", "instruction_following"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "We are benchmarking an LLM on a Xiaomi phone. Remember this target device: Xiaomi 17."
+        },
+        {
+          "role": "assistant",
+          "content": "Understood. The target device is Xiaomi 17."
+        },
+        {
+          "role": "user",
+          "content": "What is the target device? Answer with the device name only."
+        }
+      ],
+      "expected_answer": "Xiaomi 17",
+      "judge_rule": "contains",
+      "max_new_tokens": 192
+    },
+    {
+      "id": "complex_en_metrics_001",
+      "language": "en",
+      "category": "benchmark_metrics",
+      "difficulty": "medium",
+      "tags": ["metrics", "hardware"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "Name three useful things to monitor while an on-device LLM is generating text. Keep the answer short."
+        }
+      ],
+      "expected_answer": "memory,temperature,tokens",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 256
+    },
+    {
+      "id": "complex_en_safety_001",
+      "language": "en",
+      "category": "safety",
+      "difficulty": "medium",
+      "tags": ["thermal", "device_safety"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "During a long phone benchmark, the battery temperature rises sharply and the device feels hot. What should the tester do first?"
+        }
+      ],
+      "expected_answer": "pause,stop,cool",
+      "judge_rule": "contains_any",
+      "max_new_tokens": 192
+    }
+  ]
+}

@@ -58,6 +58,31 @@ MLC build caches, and downloaded model weights can grow quickly.
    ./scripts/pull_reports.sh
    ```
 
+For command-line automation, the debug app also accepts intent extras:
+
+```bash
+ADB=/Users/heng/Downloads/platform-tools/adb \
+MODEL_ID=Qwen3-1.7B-q4f16_1-MLC \
+BENCHMARK_ID=qa_complex_stress \
+./scripts/run_benchmark_adb.sh
+```
+
+The app writes each run to its sandbox under `files/reports/<timestamp>_<benchmark_id>/`
+with `report.json`, `report.csv`, and `report.md`.
+
+## Benchmark And Hardware Metrics
+
+Benchmark JSON supports both legacy single `prompt` items and multi-turn
+`messages` items. Complex QA items can include `difficulty`, `tags`,
+`judge_rule`, and per-item `max_new_tokens`.
+
+Reports include top-level and per-item hardware samples:
+
+- app PSS, Java heap, and native heap
+- system available/total memory and used ratio
+- battery temperature
+- maximum readable thermal-zone temperature and zone name
+
 ## MLC Integration
 
 The first model entry targets `HF://mlc-ai/Qwen3-1.7B-q4f16_1-MLC`, which is a 1-2B Qwen-family MLC model suitable for the requested first pass. The app keeps the APK lightweight by downloading model weights on first use instead of bundling them.

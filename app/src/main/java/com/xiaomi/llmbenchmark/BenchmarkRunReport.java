@@ -1,5 +1,6 @@
 package com.xiaomi.llmbenchmark;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import org.json.JSONArray;
@@ -14,6 +15,7 @@ final class BenchmarkRunReport {
     final BenchmarkConfig benchmark;
     final long modelLoadMs;
     final List<BenchmarkItemResult> results;
+    final List<HardwareSample> hardwareSamples;
 
     BenchmarkRunReport(
             String runId,
@@ -23,7 +25,8 @@ final class BenchmarkRunReport {
             ModelConfig model,
             BenchmarkConfig benchmark,
             long modelLoadMs,
-            List<BenchmarkItemResult> results) {
+            List<BenchmarkItemResult> results,
+            List<HardwareSample> hardwareSamples) {
         this.runId = runId;
         this.startedAtMs = startedAtMs;
         this.finishedAtMs = finishedAtMs;
@@ -32,6 +35,10 @@ final class BenchmarkRunReport {
         this.benchmark = benchmark;
         this.modelLoadMs = modelLoadMs;
         this.results = Collections.unmodifiableList(results);
+        this.hardwareSamples =
+                hardwareSamples == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(hardwareSamples));
     }
 
     int passedCount() {
@@ -95,6 +102,7 @@ final class BenchmarkRunReport {
         metrics.put("total_items", results.size());
         metrics.put("average_decode_tokens_per_second", averageTokensPerSecond());
         json.put("metrics", metrics);
+        json.put("hardware", new HardwareSummary(hardwareSamples).toJson(hardwareSamples));
         JSONArray resultArray = new JSONArray();
         for (BenchmarkItemResult result : results) {
             resultArray.put(result.toJson());
@@ -103,4 +111,3 @@ final class BenchmarkRunReport {
         return json;
     }
 }
-

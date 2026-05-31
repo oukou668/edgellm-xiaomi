@@ -18,12 +18,15 @@ final class BenchmarkRunner {
 
     BenchmarkRunReport run(ModelConfig model, BenchmarkConfig benchmark, ProgressSink progress) throws Exception {
         long startedAt = System.currentTimeMillis();
+        HardwareMonitor monitor = new HardwareMonitor(context, benchmark.hardwareSampleIntervalMs);
+        monitor.start();
         DeviceInfo deviceInfo = DeviceInfo.collect(context.getFilesDir());
         progress.onProgress("Device: " + deviceInfo.summary());
 
         File modelDir = downloader.ensureModel(model, progress);
         InferenceEngine engine = EngineFactory.create();
         long loadStartNs = System.nanoTime();
+        monitor.setPhase("model_load", "");
         progress.onProgress("Loading MLC engine: " + model.modelId);
         List<BenchmarkItemResult> results = new ArrayList<>();
         long loadMs;
@@ -35,6 +38,7 @@ final class BenchmarkRunner {
             loadMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - loadStartNs);
             String message = loadError.getClass().getSimpleName() + ": " + loadError.getMessage();
             progress.onProgress("Model load failed: " + message);
+            monitor.setPhase("model_load_failed", "");
             for (BenchmarkItem item : benchmark.items) {
                 results.add(
                         new BenchmarkItemResult(
@@ -45,8 +49,10 @@ final class BenchmarkRunner {
                                 -1L,
                                 -1L,
                                 0,
-                                0.0));
+                                0.0,
+                                new ArrayList<>()));
             }
+            monitor.close();
             return new BenchmarkRunReport(
                     UUID.randomUUID().toString(),
                     startedAt,
@@ -55,16 +61,20 @@ final class BenchmarkRunner {
                     model,
                     benchmark,
                     loadMs,
-                    results);
+                    results,
+                    monitor.snapshot());
         }
 
         try {
             for (int i = 0; i < benchmark.items.size(); i++) {
                 BenchmarkItem item = benchmark.items.get(i);
                 progress.onProgress("Running " + (i + 1) + "/" + benchmark.items.size() + ": " + item.id);
+                monitor.setPhase("inference", item.id);
+                int sampleStart = monitor.snapshot().size();
                 try {
-                    GenerationResult generation =
-                            engine.generate(item.prompt, model.defaultParams, item.maxNewTokens);
+                    GenerationResult generation = engine.generate(item, model.defaultParams);
+                    monitor.setPhase("post_inference", item.id);
+                    List<HardwareSample> itemSamples = samplesSince(monitor, sampleStart);
                     boolean passed = Judge.score(item, generation.text);
                     double tps =
                             generation.totalLatencyMs <= 0
@@ -79,8 +89,10 @@ final class BenchmarkRunner {
                                     generation.firstTokenLatencyMs,
                                     generation.totalLatencyMs,
                                     generation.estimatedOutputTokens,
-                                    tps));
+                                    tps,
+                                    itemSamples));
                 } catch (Exception itemError) {
+                    monitor.setPhase("inference_error", item.id);
                     results.add(
                             new BenchmarkItemResult(
                                     item,
@@ -90,11 +102,14 @@ final class BenchmarkRunner {
                                     -1L,
                                     -1L,
                                     0,
-                                    0.0));
+                                    0.0,
+                                    samplesSince(monitor, sampleStart)));
                 }
             }
         } finally {
+            monitor.setPhase("unload", "");
             engine.unload();
+            monitor.close();
         }
 
         return new BenchmarkRunReport(
@@ -105,6 +120,15 @@ final class BenchmarkRunner {
                 model,
                 benchmark,
                 loadMs,
-                results);
+                results,
+                monitor.snapshot());
+    }
+
+    private static List<HardwareSample> samplesSince(HardwareMonitor monitor, int start) {
+        List<HardwareSample> all = monitor.snapshot();
+        if (start < 0 || start >= all.size()) {
+            return all;
+        }
+        return new ArrayList<>(all.subList(start, all.size()));
     }
 }
