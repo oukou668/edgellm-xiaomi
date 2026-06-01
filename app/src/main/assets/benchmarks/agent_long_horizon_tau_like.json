@@ -1,0 +1,138 @@
+{
+  "benchmark_id": "agent_long_horizon_tau_like",
+  "display_name": "Agent Long-Horizon Tau-like",
+  "version": "2026-06-01",
+  "description": "Long-horizon agent tasks inspired by tau-bench: each item gives a domain policy, tool list, current state, user goal, and asks the model to produce an ordered tool plan plus final response.",
+  "default_max_new_tokens": 384,
+  "hardware_sample_interval_ms": 500,
+  "items": [
+    {
+      "id": "tau_retail_exchange_001",
+      "language": "en",
+      "category": "retail_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "tool_use", "policy", "retail"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "You are an e-commerce support agent. Policy: exchanges are allowed within 30 days if the item is delivered and not final-sale; price differences must be charged or refunded; always verify the order before creating an exchange. Available tools: get_customer(email), list_orders(customer_id), get_order(order_id), check_inventory(sku, size), create_exchange(order_id, old_item_id, new_sku, new_size), send_confirmation(customer_id, case_id). Current user: email mei.chen@example.com. User request: I bought the TrailShell jacket in size M two weeks ago, order should be my latest one, but I need size L. If it is in stock, exchange it and send me confirmation. Return only an ordered ACTION PLAN with tool names and key arguments, then FINAL response."
+        }
+      ],
+      "expected_answer": "get_customer,list_orders,get_order,check_inventory,create_exchange,send_confirmation,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_retail_refund_002",
+      "language": "en",
+      "category": "retail_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "tool_use", "policy", "refund"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "Domain: online store returns. Policy: refund to original payment only after the return label is created; damaged-on-arrival claims require photo evidence; do not promise instant refund. Tools: get_customer(email), list_orders(customer_id), get_order(order_id), create_return_label(order_id, item_id, reason), request_evidence(customer_id, evidence_type), update_case(case_id, note). State: customer email alex.rivera@example.com; they say the blender in order R-88291 arrived cracked yesterday and they want a refund. Task: choose the compliant next steps. Return an ordered ACTION PLAN and a short FINAL response."
+        }
+      ],
+      "expected_answer": "get_customer,get_order,request_evidence,create_return_label,update_case,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_airline_change_001",
+      "language": "en",
+      "category": "airline_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "tool_use", "policy", "travel"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "You are an airline agent. Policy: before changing a flight, verify passenger identity and booking; same-day confirmed changes require seat availability and fare difference acceptance; if fare difference is over $75, ask for user confirmation before booking. Tools: verify_passenger(record_locator, last_name), get_booking(record_locator), search_flights(origin, destination, date), quote_change(record_locator, flight_id), hold_change(record_locator, flight_id), ask_user(question). User: Record locator H7K2Q9, last name Wang. They want the earliest same-day flight from SFO to SEA tomorrow and say they accept fees up to $75. Produce the ordered ACTION PLAN and FINAL response."
+        }
+      ],
+      "expected_answer": "verify_passenger,get_booking,search_flights,quote_change,hold_change,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_airline_baggage_002",
+      "language": "en",
+      "category": "airline_agent",
+      "difficulty": "medium",
+      "tags": ["long_horizon", "tool_use", "baggage"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "Airline baggage support. Policy: missing baggage reports require verified booking, bag tag, delivery address, and phone number; if bag is already scanned at destination, create delivery request, otherwise create tracing case. Tools: verify_passenger(record_locator, last_name), get_bag_status(bag_tag), collect_missing_info(fields), create_delivery_request(bag_tag, address, phone), create_tracing_case(record_locator, bag_tag), send_case_summary(case_id). User: locator M4P8TT, last name Garcia, bag tag 0066123456, delivery address 88 Market St San Francisco CA, phone 415-555-0192. The bag did not arrive. Return ordered ACTION PLAN and FINAL."
+        }
+      ],
+      "expected_answer": "verify_passenger,get_bag_status,create_delivery_request,send_case_summary,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_phone_benchmark_001",
+      "language": "zh",
+      "category": "device_benchmark_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "tool_use", "android", "benchmark"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "你是手机端LLM benchmark执行代理。策略：先确认设备在线和电量温度安全，再安装APK，再运行指定benchmark，最后拉回报告；如果温度超过45C，应暂停并提醒降温。可用工具：adb_devices(), get_device_thermal(), install_apk(path), run_benchmark(model_id, benchmark_id), wait_report(benchmark_id), pull_reports(), summarize_report(path)。当前任务：在小米17上运行模型Qwen3-1.7B-q4f16_1-MLC，benchmark为agent_long_horizon_tau_like，并生成报告摘要。请只输出有序ACTION PLAN和FINAL。"
+        }
+      ],
+      "expected_answer": "adb_devices,get_device_thermal,install_apk,run_benchmark,wait_report,pull_reports,summarize_report,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_phone_benchmark_thermal_002",
+      "language": "zh",
+      "category": "device_benchmark_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "policy", "thermal", "safety"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "手机benchmark代理规则：温度安全优先；battery_temp_c >= 45时不能继续新一轮长测，只能暂停、记录状态、提醒降温，之后再复查。工具：get_device_thermal(), pause_benchmark(), write_note(text), notify_user(text), run_benchmark(model_id, benchmark_id)。当前状态：battery_temp_c=47.2，用户要求立刻继续跑qa_complex_stress。请给出合规ACTION PLAN和FINAL。"
+        }
+      ],
+      "expected_answer": "get_device_thermal,pause_benchmark,write_note,notify_user,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_enterprise_it_001",
+      "language": "en",
+      "category": "it_helpdesk_agent",
+      "difficulty": "hard",
+      "tags": ["long_horizon", "access_control", "tool_use"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "Enterprise IT agent. Policy: never grant production access without manager approval and a matching ticket; temporary access must expire within 24 hours; log every decision. Tools: lookup_employee(email), get_ticket(ticket_id), check_manager_approval(ticket_id), grant_temp_access(user_id, system, hours), deny_request(reason), write_audit_log(ticket_id, decision). User: priya@corp.example asks for prod-db access for ticket INC-1042 for 8 hours. Return ordered ACTION PLAN and FINAL."
+        }
+      ],
+      "expected_answer": "lookup_employee,get_ticket,check_manager_approval,grant_temp_access,write_audit_log,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    },
+    {
+      "id": "tau_hospitality_booking_001",
+      "language": "en",
+      "category": "hotel_agent",
+      "difficulty": "medium",
+      "tags": ["long_horizon", "booking", "tool_use"],
+      "messages": [
+        {
+          "role": "user",
+          "content": "Hotel booking agent. Policy: upgrades can be applied only when inventory exists; loyalty upgrades are free for Platinum members, otherwise quote price first; always send updated itinerary. Tools: get_guest(email), get_reservation(confirmation_id), check_room_inventory(date_range, room_type), apply_upgrade(confirmation_id, room_type), quote_upgrade(confirmation_id, room_type), send_itinerary(guest_id, confirmation_id). User email: samira.patel@example.com, confirmation HN3390, asks for suite upgrade for the existing stay. Return ordered ACTION PLAN and FINAL."
+        }
+      ],
+      "expected_answer": "get_guest,get_reservation,check_room_inventory,apply_upgrade,send_itinerary,FINAL",
+      "judge_rule": "contains_ordered",
+      "max_new_tokens": 384
+    }
+  ]
+}

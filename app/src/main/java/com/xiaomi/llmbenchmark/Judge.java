@@ -15,6 +15,18 @@ final class Judge {
             return normalizedOutput.equals(normalize(expected));
         }
         String[] needles = expected.split(",");
+        if ("contains_ordered".equals(item.judgeRule)) {
+            int cursor = 0;
+            for (String needle : needles) {
+                String normalizedNeedle = normalize(needle);
+                int position = normalizedOutput.indexOf(normalizedNeedle, cursor);
+                if (position < 0) {
+                    return false;
+                }
+                cursor = position + normalizedNeedle.length();
+            }
+            return true;
+        }
         if ("contains_any".equals(item.judgeRule)) {
             for (String needle : needles) {
                 if (normalizedOutput.contains(normalize(needle))) {
@@ -37,4 +49,3 @@ final class Judge {
                 : value.toLowerCase(Locale.ROOT).replaceAll("\\s+", " ").trim();
     }
 }
-

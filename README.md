@@ -88,6 +88,14 @@ Benchmark JSON supports both legacy single `prompt` items and multi-turn
 `messages` items. Complex QA items can include `difficulty`, `tags`,
 `judge_rule`, and per-item `max_new_tokens`.
 
+Current benchmark sets include:
+
+- `qa_smoke_zh_en`: bilingual QA smoke set.
+- `qa_complex_stress`: longer QA, summarization, reasoning, and multi-turn tasks.
+- `agent_long_horizon_tau_like`: tau-bench-inspired long-horizon agent tasks
+  with domain policy, tool lists, state constraints, ordered action plans, and
+  final user responses.
+
 Reports include top-level and per-item hardware samples:
 
 - app PSS, Java heap, and native heap
