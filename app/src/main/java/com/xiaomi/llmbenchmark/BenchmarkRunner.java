@@ -18,7 +18,7 @@ final class BenchmarkRunner {
 
     BenchmarkRunReport run(ModelConfig model, BenchmarkConfig benchmark, ProgressSink progress) throws Exception {
         long startedAt = System.currentTimeMillis();
-        HardwareMonitor monitor = new HardwareMonitor(context, benchmark.hardwareSampleIntervalMs);
+        HardwareMonitor monitor = new HardwareMonitor(context, benchmark.hardwareSampleIntervalMs, progress);
         monitor.start();
         DeviceInfo deviceInfo = DeviceInfo.collect(context.getFilesDir());
         progress.onProgress("Device: " + deviceInfo.summary());
@@ -69,10 +69,11 @@ final class BenchmarkRunner {
             for (int i = 0; i < benchmark.items.size(); i++) {
                 BenchmarkItem item = benchmark.items.get(i);
                 progress.onProgress("Running " + (i + 1) + "/" + benchmark.items.size() + ": " + item.id);
+                progress.onItemStarted(i + 1, benchmark.items.size(), item);
                 monitor.setPhase("inference", item.id);
                 int sampleStart = monitor.snapshot().size();
                 try {
-                    GenerationResult generation = engine.generate(item, model.defaultParams);
+                    GenerationResult generation = engine.generate(item, model.defaultParams, progress);
                     monitor.setPhase("post_inference", item.id);
                     List<HardwareSample> itemSamples = samplesSince(monitor, sampleStart);
                     boolean passed = Judge.score(item, generation.text);

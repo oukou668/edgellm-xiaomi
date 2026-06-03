@@ -21,16 +21,18 @@ final class HardwareMonitor implements AutoCloseable {
     private final Context context;
     private final long startMs;
     private final long intervalMs;
+    private final ProgressSink progress;
     private final List<HardwareSample> samples = Collections.synchronizedList(new ArrayList<>());
     private volatile boolean running = true;
     private volatile String phase = "idle";
     private volatile String itemId = "";
     private Thread worker;
 
-    HardwareMonitor(Context context, long intervalMs) {
+    HardwareMonitor(Context context, long intervalMs, ProgressSink progress) {
         this.context = context.getApplicationContext();
         this.startMs = System.currentTimeMillis();
         this.intervalMs = Math.max(250L, intervalMs);
+        this.progress = progress;
     }
 
     void start() {
@@ -89,7 +91,7 @@ final class HardwareMonitor implements AutoCloseable {
             Debug.getMemoryInfo(debugMemory);
 
             ThermalReading thermal = readMaxThermal();
-            samples.add(
+            HardwareSample sample =
                     new HardwareSample(
                             System.currentTimeMillis() - startMs,
                             phase,
@@ -101,7 +103,11 @@ final class HardwareMonitor implements AutoCloseable {
                             Debug.getNativeHeapAllocatedSize(),
                             readBatteryTemperatureC(),
                             thermal.temperatureC,
-                            thermal.zone));
+                            thermal.zone);
+            samples.add(sample);
+            if (progress != null) {
+                progress.onHardwareSample(sample);
+            }
         } catch (Exception ignored) {
         }
     }

@@ -16,6 +16,7 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import java.io.File;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -32,9 +33,13 @@ public final class MainActivity extends Activity {
     private Button runButton;
     private ProgressBar progressBar;
     private TextView statusView;
+    private TextView currentItemView;
+    private TextView hardwareView;
+    private TextView liveOutputView;
     private TextView logView;
     private List<ModelConfig> models;
     private List<BenchmarkConfig> benchmarks;
+    private final StringBuilder liveOutputBuffer = new StringBuilder();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,6 +107,32 @@ public final class MainActivity extends Activity {
         statusView.setPadding(0, dp(12), 0, dp(8));
         root.addView(statusView, matchWrap());
 
+        currentItemView = new TextView(this);
+        currentItemView.setTextSize(13);
+        currentItemView.setTextColor(0xFF26332F);
+        currentItemView.setPadding(0, dp(4), 0, dp(4));
+        root.addView(currentItemView, matchWrap());
+
+        root.addView(label("Live Hardware"));
+        hardwareView = new TextView(this);
+        hardwareView.setTextSize(13);
+        hardwareView.setTextColor(0xFF18201D);
+        hardwareView.setTextIsSelectable(true);
+        hardwareView.setPadding(dp(10), dp(8), dp(10), dp(8));
+        hardwareView.setBackgroundColor(0xFFE8EFEA);
+        root.addView(hardwareView, matchWrap());
+
+        root.addView(label("Live Output"));
+        liveOutputView = new TextView(this);
+        liveOutputView.setTextSize(12);
+        liveOutputView.setTextColor(0xFF18201D);
+        liveOutputView.setTextIsSelectable(true);
+        liveOutputView.setPadding(dp(10), dp(8), dp(10), dp(8));
+        liveOutputView.setMinLines(8);
+        liveOutputView.setBackgroundColor(0xFFFFFFFF);
+        root.addView(liveOutputView, matchWrap());
+
+        root.addView(label("Run Log"));
         logView = new TextView(this);
         logView.setTextSize(12);
         logView.setTextColor(0xFF252B29);
@@ -148,18 +179,23 @@ public final class MainActivity extends Activity {
         runButton.setEnabled(false);
         progressBar.setVisibility(View.VISIBLE);
         logView.setText("");
+        liveOutputBuffer.setLength(0);
+        currentItemView.setText("");
+        hardwareView.setText("Waiting for first sample...");
+        liveOutputView.setText("");
         statusView.setText("Running " + benchmark.displayName);
 
         executor.submit(
                 () -> {
                     try {
                         BenchmarkRunner runner = new BenchmarkRunner(this);
-                        BenchmarkRunReport report = runner.run(model, benchmark, this::appendLog);
+                        BenchmarkRunReport report = runner.run(model, benchmark, new UiProgressSink());
                         File reportDir = new ReportWriter(this).write(report);
                         post(
                                 () -> {
                                     progressBar.setVisibility(View.GONE);
                                     runButton.setEnabled(true);
+                                    currentItemView.setText("Finished " + benchmark.benchmarkId);
                                     statusView.setText(
                                             "Done. Passed "
                                                     + report.passedCount()
@@ -181,7 +217,7 @@ public final class MainActivity extends Activity {
     }
 
     private void maybeAutorun(Intent intent) {
-        if (intent == null || !intent.getBooleanExtra(EXTRA_AUTORUN, false)) {
+        if (!shouldAutorun(intent)) {
             return;
         }
         if (models == null || benchmarks == null || models.isEmpty() || benchmarks.isEmpty()) {
@@ -198,6 +234,20 @@ public final class MainActivity extends Activity {
         benchmarkSpinner.setSelection(benchmarks.indexOf(benchmark));
         statusView.setText("Autorun requested: " + benchmark.benchmarkId);
         mainHandler.post(() -> runBenchmark(model, benchmark));
+    }
+
+    private boolean shouldAutorun(Intent intent) {
+        if (intent == null) {
+            return false;
+        }
+        if (intent.getBooleanExtra(EXTRA_AUTORUN, false)) {
+            return true;
+        }
+        String autorun = intent.getStringExtra(EXTRA_AUTORUN);
+        if ("true".equalsIgnoreCase(autorun) || "1".equals(autorun)) {
+            return true;
+        }
+        return intent.hasExtra(EXTRA_MODEL_ID) || intent.hasExtra(EXTRA_BENCHMARK_ID);
     }
 
     private ModelConfig findModel(String modelId) {
@@ -228,6 +278,84 @@ public final class MainActivity extends Activity {
         post(() -> logView.append(message + "\n"));
     }
 
+    private void showCurrentItem(int index, int total, BenchmarkItem item) {
+        post(
+                () -> {
+                    currentItemView.setText(
+                            "Item "
+                                    + index
+                                    + "/"
+                                    + total
+                                    + ": "
+                                    + item.id
+                                    + " | "
+                                    + item.difficulty
+                                    + " | "
+                                    + item.category);
+                    liveOutputBuffer.setLength(0);
+                    liveOutputView.setText("");
+                });
+    }
+
+    private void appendLiveOutput(String token, String fullText) {
+        post(
+                () -> {
+                    if (fullText != null && fullText.length() < liveOutputBuffer.length()) {
+                        liveOutputBuffer.setLength(0);
+                    }
+                    liveOutputBuffer.append(token == null ? "" : token);
+                    int maxChars = 8000;
+                    if (liveOutputBuffer.length() > maxChars) {
+                        liveOutputBuffer.delete(0, liveOutputBuffer.length() - maxChars);
+                    }
+                    liveOutputView.setText(liveOutputBuffer.toString());
+                });
+    }
+
+    private void showHardware(HardwareSample sample) {
+        post(() -> hardwareView.setText(formatHardware(sample)));
+    }
+
+    private static String formatHardware(HardwareSample sample) {
+        return "Phase: "
+                + sample.phase
+                + (sample.itemId == null || sample.itemId.isEmpty() ? "" : " | Item: " + sample.itemId)
+                + "\nApp PSS: "
+                + formatBytes(sample.appPssBytes)
+                + " | Java heap: "
+                + formatBytes(sample.appJavaHeapBytes)
+                + " | Native heap: "
+                + formatBytes(sample.appNativeHeapBytes)
+                + "\nSystem memory used: "
+                + String.format(Locale.US, "%.1f%%", sample.systemMemoryUsedRatio() * 100.0)
+                + " | Available: "
+                + formatBytes(sample.systemAvailMemBytes)
+                + "\nBattery: "
+                + formatTemp(sample.batteryTempC)
+                + " | Thermal: "
+                + formatTemp(sample.maxThermalTempC)
+                + (sample.maxThermalZone == null || sample.maxThermalZone.isEmpty()
+                        ? ""
+                        : " (" + sample.maxThermalZone + ")")
+                + "\nElapsed: "
+                + sample.elapsedMs
+                + " ms";
+    }
+
+    private static String formatBytes(long bytes) {
+        if (bytes <= 0L) {
+            return "n/a";
+        }
+        return String.format(Locale.US, "%.1f MiB", bytes / 1024.0 / 1024.0);
+    }
+
+    private static String formatTemp(double tempC) {
+        if (Double.isNaN(tempC)) {
+            return "n/a";
+        }
+        return String.format(Locale.US, "%.1f C", tempC);
+    }
+
     private void post(Runnable runnable) {
         mainHandler.post(runnable);
     }
@@ -245,5 +373,27 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams params = matchWrap();
         params.topMargin = topDp;
         return params;
+    }
+
+    private final class UiProgressSink implements ProgressSink {
+        @Override
+        public void onProgress(String message) {
+            appendLog(message);
+        }
+
+        @Override
+        public void onItemStarted(int index, int total, BenchmarkItem item) {
+            showCurrentItem(index, total, item);
+        }
+
+        @Override
+        public void onGenerationToken(String itemId, String token, String fullText) {
+            appendLiveOutput(token, fullText);
+        }
+
+        @Override
+        public void onHardwareSample(HardwareSample sample) {
+            showHardware(sample);
+        }
     }
 }

@@ -59,7 +59,7 @@ final class MlcInferenceEngine implements InferenceEngine {
     }
 
     @Override
-    public GenerationResult generate(BenchmarkItem item, GenerationParams params) throws Exception {
+    public GenerationResult generate(BenchmarkItem item, GenerationParams params, ProgressSink progress) throws Exception {
         if (engine == null) {
             throw new IllegalStateException("MLC engine is not loaded.");
         }
@@ -109,6 +109,9 @@ final class MlcInferenceEngine implements InferenceEngine {
                     firstTokenNs = System.nanoTime();
                 }
                 text.append(parsed.content);
+                if (progress != null) {
+                    progress.onGenerationToken(item.id, parsed.content, text.toString());
+                }
             }
             if (parsed.finished) {
                 finished = true;
