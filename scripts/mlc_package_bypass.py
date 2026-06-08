@@ -8,6 +8,7 @@ loaded by treating the installed ``mlc_llm`` directory as a namespace package.
 """
 
 import importlib
+import importlib.util
 import hashlib
 import os
 import site
@@ -19,6 +20,17 @@ _HF_ENDPOINT = "https://hf-mirror.com"
 
 
 def find_mlc_llm_package() -> Path:
+    explicit = os.environ.get("MLC_LLM_PYTHON_PACKAGE_DIR")
+    if explicit:
+        package_dir = Path(explicit)
+        if (package_dir / "cli" / "package.py").is_file():
+            return package_dir
+        raise RuntimeError(f"MLC_LLM_PYTHON_PACKAGE_DIR is not a package dir: {package_dir}")
+    spec = importlib.util.find_spec("mlc_llm")
+    if spec is not None and spec.submodule_search_locations:
+        package_dir = Path(next(iter(spec.submodule_search_locations)))
+        if (package_dir / "cli" / "package.py").is_file():
+            return package_dir
     candidates = []
     for base in site.getsitepackages() + [site.getusersitepackages()]:
         candidates.append(Path(base) / "mlc_llm")

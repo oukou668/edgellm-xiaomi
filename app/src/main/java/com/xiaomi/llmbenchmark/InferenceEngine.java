@@ -7,5 +7,7 @@ interface InferenceEngine {
 
     GenerationResult generate(BenchmarkItem item, GenerationParams params) throws Exception;
 
+    RuntimeDiagnostics diagnostics();
+
     void unload();
 }

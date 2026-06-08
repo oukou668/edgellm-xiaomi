@@ -7,6 +7,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.view.Gravity;
 import android.view.View;
+import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
 import android.widget.LinearLayout;
@@ -21,12 +22,18 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final String EXTRA_AUTORUN = "autorun";
+    private static final String EXTRA_BACKEND_ID = "backend_id";
     private static final String EXTRA_MODEL_ID = "model_id";
     private static final String EXTRA_BENCHMARK_ID = "benchmark_id";
+    private static final String EXTRA_SMOKE_TYPE = "smoke_type";
+    private static final String EXTRA_REPEAT_COUNT = "repeat_count";
+    private static final String EXTRA_WARMUP_COUNT = "warmup_count";
+    private static final String EXTRA_BUNDLE_ID = "bundle_id";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
 
+    private Spinner backendSpinner;
     private Spinner modelSpinner;
     private Spinner benchmarkSpinner;
     private Button runButton;
@@ -34,6 +41,7 @@ public final class MainActivity extends Activity {
     private TextView statusView;
     private TextView logView;
     private List<ModelConfig> models;
+    private List<ModelConfig> visibleModels;
     private List<BenchmarkConfig> benchmarks;
 
     @Override
@@ -78,8 +86,11 @@ public final class MainActivity extends Activity {
         subtitle.setPadding(0, dp(4), 0, dp(16));
         root.addView(subtitle, matchWrap());
 
+        backendSpinner = new Spinner(this);
         modelSpinner = new Spinner(this);
         benchmarkSpinner = new Spinner(this);
+        root.addView(label("Backend"));
+        root.addView(backendSpinner, matchWrap());
         root.addView(label("Model"));
         root.addView(modelSpinner, matchWrap());
         root.addView(label("Benchmark"));
@@ -123,7 +134,22 @@ public final class MainActivity extends Activity {
         try {
             models = ModelRegistry.load(this).all();
             benchmarks = BenchmarkRegistry.load(this).all();
-            modelSpinner.setAdapter(new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, models));
+            backendSpinner.setAdapter(
+                    new ArrayAdapter<>(
+                            this,
+                            android.R.layout.simple_spinner_dropdown_item,
+                            new String[] {ModelConfig.BACKEND_MLC, ModelConfig.BACKEND_LLAMA_CPP}));
+            backendSpinner.setOnItemSelectedListener(
+                    new AdapterView.OnItemSelectedListener() {
+                        @Override
+                        public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                            updateModelSpinner(String.valueOf(parent.getItemAtPosition(position)));
+                        }
+
+                        @Override
+                        public void onNothingSelected(AdapterView<?> parent) {}
+                    });
+            updateModelSpinner(ModelConfig.BACKEND_MLC);
             benchmarkSpinner.setAdapter(
                     new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, benchmarks));
             statusView.setText("Ready. Models: " + models.size() + ", benchmarks: " + benchmarks.size());
@@ -141,20 +167,20 @@ public final class MainActivity extends Activity {
         }
         ModelConfig model = (ModelConfig) modelSpinner.getSelectedItem();
         BenchmarkConfig benchmark = (BenchmarkConfig) benchmarkSpinner.getSelectedItem();
-        runBenchmark(model, benchmark);
+        runBenchmark(model, benchmark, BenchmarkRunOptions.defaults(model.backendId));
     }
 
-    private void runBenchmark(ModelConfig model, BenchmarkConfig benchmark) {
+    private void runBenchmark(ModelConfig model, BenchmarkConfig benchmark, BenchmarkRunOptions options) {
         runButton.setEnabled(false);
         progressBar.setVisibility(View.VISIBLE);
         logView.setText("");
-        statusView.setText("Running " + benchmark.displayName);
+        statusView.setText("Running " + benchmark.displayName + " on " + options.backendId);
 
         executor.submit(
                 () -> {
                     try {
                         BenchmarkRunner runner = new BenchmarkRunner(this);
-                        BenchmarkRunReport report = runner.run(model, benchmark, this::appendLog);
+                        BenchmarkRunReport report = runner.run(model, benchmark, options, this::appendLog);
                         File reportDir = new ReportWriter(this).write(report);
                         post(
                                 () -> {
@@ -192,22 +218,51 @@ public final class MainActivity extends Activity {
         }
         String requestedModelId = intent.getStringExtra(EXTRA_MODEL_ID);
         String requestedBenchmarkId = intent.getStringExtra(EXTRA_BENCHMARK_ID);
-        ModelConfig model = findModel(requestedModelId);
-        BenchmarkConfig benchmark = findBenchmark(requestedBenchmarkId);
-        modelSpinner.setSelection(models.indexOf(model));
-        benchmarkSpinner.setSelection(benchmarks.indexOf(benchmark));
+        String requestedBackendId = intent.getStringExtra(EXTRA_BACKEND_ID);
+        String requestedBundleId = intent.getStringExtra(EXTRA_BUNDLE_ID);
+        if (requestedBackendId == null || requestedBackendId.isEmpty()) {
+            requestedBackendId = ModelConfig.BACKEND_MLC;
+        }
+        selectBackend(requestedBackendId);
+        ModelConfig model = findModel(requestedBackendId, requestedModelId);
+        BenchmarkConfig benchmark;
+        try {
+            benchmark =
+                    requestedBundleId == null || requestedBundleId.isEmpty()
+                            ? findBenchmark(requestedBenchmarkId)
+                            : BenchmarkRegistry.loadBundle(this, requestedBundleId);
+        } catch (Exception error) {
+            appendLog("Requested bundle failed, using asset benchmark: " + error.getMessage());
+            benchmark = findBenchmark(requestedBenchmarkId);
+        }
+        modelSpinner.setSelection(visibleModels.indexOf(model));
+        if (benchmarks.indexOf(benchmark) >= 0) {
+            benchmarkSpinner.setSelection(benchmarks.indexOf(benchmark));
+        }
         statusView.setText("Autorun requested: " + benchmark.benchmarkId);
-        mainHandler.post(() -> runBenchmark(model, benchmark));
+        BenchmarkRunOptions options =
+                new BenchmarkRunOptions(
+                        requestedBackendId,
+                        intent.getStringExtra(EXTRA_SMOKE_TYPE),
+                        intent.getIntExtra(EXTRA_REPEAT_COUNT, 1),
+                        intent.getIntExtra(EXTRA_WARMUP_COUNT, 0));
+        final BenchmarkConfig selectedBenchmark = benchmark;
+        mainHandler.post(() -> runBenchmark(model, selectedBenchmark, options));
     }
 
-    private ModelConfig findModel(String modelId) {
+    private ModelConfig findModel(String backendId, String modelId) {
         if (modelId != null && !modelId.isEmpty()) {
             for (ModelConfig model : models) {
-                if (modelId.equals(model.modelId)) {
+                if (backendId.equals(model.backendId) && modelId.equals(model.modelId)) {
                     return model;
                 }
             }
             appendLog("Requested model not found, using first model: " + modelId);
+        }
+        for (ModelConfig model : models) {
+            if (backendId.equals(model.backendId)) {
+                return model;
+            }
         }
         return models.get(0);
     }
@@ -226,6 +281,28 @@ public final class MainActivity extends Activity {
 
     private void appendLog(String message) {
         post(() -> logView.append(message + "\n"));
+    }
+
+    private void updateModelSpinner(String backendId) {
+        visibleModels = new java.util.ArrayList<>();
+        for (ModelConfig model : models) {
+            if (backendId.equals(model.backendId)) {
+                visibleModels.add(model);
+            }
+        }
+        modelSpinner.setAdapter(
+                new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, visibleModels));
+    }
+
+    private void selectBackend(String backendId) {
+        for (int i = 0; i < backendSpinner.getCount(); i++) {
+            if (backendId.equals(backendSpinner.getItemAtPosition(i))) {
+                backendSpinner.setSelection(i);
+                updateModelSpinner(backendId);
+                return;
+            }
+        }
+        updateModelSpinner(ModelConfig.BACKEND_MLC);
     }
 
     private void post(Runnable runnable) {

@@ -1,0 +1,212 @@
+{
+  "mmlu_pro": {
+    "dataset_path": "TIGER-Lab/MMLU-Pro",
+    "splits": ["test", "validation"],
+    "primary_join_keys": ["question", "choices"],
+    "fallback_join_keys": ["question"],
+    "required_doc_fields": ["answer", "options"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_with_mac_enrichment",
+    "legacy_export_limitations": ["official prompt and fewshot hashes are not preserved"]
+  },
+  "mmlu_redux": {
+    "dataset_path": "fxmarty/mmlu-redux-2.0-ok",
+    "splits": ["test"],
+    "primary_join_keys": ["question", "choices"],
+    "fallback_join_keys": ["question"],
+    "required_doc_fields": ["answer", "choices"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_with_mac_enrichment",
+    "legacy_export_limitations": ["official prompt and fewshot hashes are not preserved"]
+  },
+  "gpqa_diamond": {
+    "dataset_path": "lm_eval.tasks.gpqa.generative",
+    "splits": ["harness_processed_doc"],
+    "primary_join_keys": ["saved_processed_choice_order"],
+    "fallback_join_keys": [],
+    "required_doc_fields": ["Question", "choice1", "choice2", "choice3", "choice4", "choices", "answer"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "requires_phone_saved_choice_order",
+    "legacy_export_limitations": ["processed GPQA choice order cannot be reconstructed without reshuffling"]
+  },
+  "ifeval": {
+    "dataset_path": "google/IFEval",
+    "splits": ["train"],
+    "primary_join_keys": ["prompt"],
+    "fallback_join_keys": ["prompt_sha256"],
+    "required_doc_fields": ["key", "prompt", "instruction_id_list", "kwargs"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_if_prompt_matches_official",
+    "legacy_export_limitations": ["lite prompts may not be exact official IFEval prompts"]
+  },
+  "aime25": {
+    "dataset_path": "math-ai/aime25",
+    "splits": ["test"],
+    "primary_join_keys": ["problem"],
+    "fallback_join_keys": ["prompt_sha256", "question_sha256"],
+    "required_doc_fields": ["problem", "answer"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_with_mac_enrichment",
+    "legacy_export_limitations": ["official prompt and generation kwargs are not preserved"]
+  },
+  "math500": {
+    "dataset_path": "HuggingFaceH4/MATH-500",
+    "splits": ["test"],
+    "primary_join_keys": ["problem"],
+    "fallback_join_keys": ["prompt_sha256", "question_sha256"],
+    "required_doc_fields": ["problem", "solution", "answer"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_with_mac_enrichment",
+    "legacy_export_limitations": ["lite prompt text may not preserve official problem text exactly"]
+  },
+  "bbh": {
+    "dataset_path": "SaylorTwift/bbh",
+    "splits": ["subtask:test"],
+    "primary_join_keys": ["source_subtask", "input"],
+    "fallback_join_keys": ["doc_id_subtask", "question"],
+    "required_doc_fields": ["input", "target", "source_subtask"],
+    "required_protocol_fields": ["prompt_sha256", "fewshot_examples_sha256", "choice_order_sha256", "generation_kwargs_sha256", "stop_sequences_sha256"],
+    "replayability_status": "parser_replayable_if_subtask_and_input_match",
+    "legacy_export_limitations": ["subtask and exact input text are required for official doc join"]
+  },
+  "ceval": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not part of current harness-supported parser replay scope"]
+  },
+  "squad": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not part of current harness-supported parser replay scope"]
+  },
+  "supergpqa": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "waiting_for_harness_task_or_nonofficial_evaluator",
+    "legacy_export_limitations": ["not currently supported by phase 1 parser replay"]
+  },
+  "lcb_pro_2502_easy": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "code_execution_evaluator_required",
+    "legacy_export_limitations": ["code execution benchmarks are outside parser replay scope"]
+  },
+  "ojbench": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "code_execution_evaluator_required",
+    "legacy_export_limitations": ["code execution benchmarks are outside parser replay scope"]
+  },
+  "lcb_v6_avg3": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "code_execution_evaluator_required",
+    "legacy_export_limitations": ["code execution benchmarks are outside parser replay scope"]
+  },
+  "ifbench": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not currently supported by phase 1 parser replay"]
+  },
+  "multi_if": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not currently supported by phase 1 parser replay"]
+  },
+  "multichallenge": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not currently supported by phase 1 parser replay"]
+  },
+  "aime26": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "waiting_for_harness_task_or_nonofficial_evaluator",
+    "legacy_export_limitations": ["future contest task is outside current harness-supported scope"]
+  },
+  "hmmt_feb_2026": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "waiting_for_harness_task_or_nonofficial_evaluator",
+    "legacy_export_limitations": ["future contest task is outside current harness-supported scope"]
+  },
+  "bbeh": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "not_in_phase1_parser_replay",
+    "legacy_export_limitations": ["not currently supported by phase 1 parser replay"]
+  },
+  "bfclv4": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "tool_agentic_evaluator_required",
+    "legacy_export_limitations": ["tool and agentic benchmarks are outside parser replay scope"]
+  },
+  "tau2_bench_telecom_aa": {
+    "dataset_path": "",
+    "splits": [],
+    "primary_join_keys": [],
+    "fallback_join_keys": [],
+    "required_doc_fields": [],
+    "required_protocol_fields": [],
+    "replayability_status": "tool_agentic_evaluator_required",
+    "legacy_export_limitations": ["tool and agentic benchmarks are outside parser replay scope"]
+  }
+}

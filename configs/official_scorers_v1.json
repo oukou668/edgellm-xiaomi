@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "suite_id": "table_reproduction_v1",
+  "description": "Official scorer manifest for the seven table-reproduction blocker datasets.",
+  "scorers": [
+    {
+      "dataset_id": "gpqa_diamond",
+      "adapter_id": "gpqa_harness_official_v1",
+      "scorer_backend": "harness_native",
+      "repo_url": "https://github.com/EleutherAI/lm-evaluation-harness",
+      "repo_commit": "1dd931087362abba74e0375c8c631295559f48b2",
+      "entrypoint": "lm_eval/tasks/gpqa/cot_n_shot/gpqa_diamond_cot_n_shot.yaml",
+      "required_input_fields": ["raw_generation", "doc", "choice_order_id", "sample_id"],
+      "expected_sample_count": 198,
+      "repeat_policy": {"type": "single", "samples_per_problem": 1},
+      "official_benchmark_gate": [
+        "all 198 GPQA-Diamond rows are present",
+        "each row includes the processed choice order used by inference",
+        "the saved choice order matches the scored document"
+      ]
+    },
+    {
+      "dataset_id": "supergpqa",
+      "adapter_id": "supergpqa_official_v1",
+      "scorer_backend": "official_native",
+      "repo_url": "https://github.com/SuperGPQA/SuperGPQA",
+      "repo_commit": "e31e8bf3e7089aef808be5ddecafd4538dee6e41",
+      "entrypoint": "eval/eval.py",
+      "required_input_fields": ["raw_generation", "options", "answer_letter", "discipline", "field", "subfield", "difficulty"],
+      "expected_sample_count": 26529,
+      "repeat_policy": {"type": "single", "samples_per_problem": 1},
+      "official_benchmark_gate": [
+        "all 26529 SuperGPQA rows are present",
+        "official discipline/field/subfield/difficulty metadata is preserved",
+        "option label and option-content extraction use the official evaluator logic"
+      ]
+    },
+    {
+      "dataset_id": "multi_if",
+      "adapter_id": "multi_if_official_v1",
+      "scorer_backend": "official_native",
+      "repo_url": "https://github.com/facebookresearch/Multi-IF",
+      "repo_commit": "1cdb53ed18499ad729e0766e5d3099dd5344406f",
+      "entrypoint": "metrics.py",
+      "required_input_fields": ["raw_generation", "key", "language", "turn_prompts", "instruction_id_list", "kwargs"],
+      "expected_sample_count": 4501,
+      "repeat_policy": {"type": "single", "samples_per_problem": 1},
+      "official_benchmark_gate": [
+        "all 4501 Multi-IF rows are present",
+        "turn-level prompts and responses preserve the official transcript semantics",
+        "strict and loose prompt/instruction metrics are recorded"
+      ]
+    },
+    {
+      "dataset_id": "multichallenge",
+      "adapter_id": "multichallenge_judge_v1",
+      "scorer_backend": "judge_native",
+      "repo_url": "https://github.com/ekwinox117/multi-challenge",
+      "repo_commit": "5ccefcca6a39020d66c1383c4e6a809cb07afa33",
+      "entrypoint": "src/evaluator.py",
+      "required_input_fields": ["raw_generation", "QUESTION_ID", "AXIS", "CONVERSATION", "TARGET_QUESTION", "PASS_CRITERIA"],
+      "expected_sample_count": 266,
+      "repeat_policy": {"type": "judge_single", "samples_per_problem": 1},
+      "official_benchmark_gate": [
+        "all 266 MultiChallenge rows are present",
+        "the MiniCPM5 table judge model/version/prompt is recovered and locked",
+        "judge reasoning and verdict are recorded for each row"
+      ],
+      "judge_policy": "table_priority"
+    },
+    {
+      "dataset_id": "aime26",
+      "adapter_id": "matharena_final_answer_v1",
+      "scorer_backend": "official_native",
+      "repo_url": "https://github.com/eth-sri/matharena",
+      "repo_commit": "e92766038a80eee227589f5ea688004240bca8e0",
+      "entrypoint": "configs/competitions/aime/aime_2026.yaml",
+      "required_input_fields": ["raw_generation", "problem_idx", "answer", "output_tokens"],
+      "expected_sample_count": 480,
+      "repeat_policy": {"type": "avg16", "problems": 30, "samples_per_problem": 16},
+      "official_benchmark_gate": [
+        "30 AIME 2026 problems are present",
+        "each problem has exactly 16 independent samples",
+        "MathArena final-answer extraction and grading are used"
+      ]
+    },
+    {
+      "dataset_id": "hmmt_feb_2026",
+      "adapter_id": "matharena_final_answer_v1",
+      "scorer_backend": "official_native",
+      "repo_url": "https://github.com/eth-sri/matharena",
+      "repo_commit": "e92766038a80eee227589f5ea688004240bca8e0",
+      "entrypoint": "configs/competitions/hmmt/hmmt_feb_2026.yaml",
+      "required_input_fields": ["raw_generation", "problem_idx", "answer", "output_tokens"],
+      "expected_sample_count": 528,
+      "repeat_policy": {"type": "avg16", "problems": 33, "samples_per_problem": 16},
+      "official_benchmark_gate": [
+        "33 HMMT Feb 2026 problems are present",
+        "each problem has exactly 16 independent samples",
+        "MathArena final-answer extraction and grading are used"
+      ]
+    },
+    {
+      "dataset_id": "bbeh",
+      "adapter_id": "bbeh_official_v1",
+      "scorer_backend": "official_native",
+      "repo_url": "https://github.com/google-deepmind/bbeh",
+      "repo_commit": "80d12ca916b7158f22293fcf3144f4d3d854d4be",
+      "entrypoint": "bbeh/evaluate.py",
+      "required_input_fields": ["raw_generation", "reference_answer", "sample_id"],
+      "expected_sample_count": 4520,
+      "repeat_policy": {"type": "single", "samples_per_problem": 1},
+      "official_benchmark_gate": [
+        "all 4520 BBEH rows are present",
+        "the full BBEH set is used rather than a mini subset",
+        "official answer extraction and fuzzy matching are used"
+      ]
+    }
+  ]
+}

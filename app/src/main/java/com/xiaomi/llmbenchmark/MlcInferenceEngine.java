@@ -1,8 +1,11 @@
 package com.xiaomi.llmbenchmark;
 
+import android.content.Context;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -12,12 +15,18 @@ import org.json.JSONObject;
 
 final class MlcInferenceEngine implements InferenceEngine {
     private static final String TAG = "XiaomiLlmBenchmark";
+    private final Context context;
     private Object engine;
     private Method reload;
     private Method chatCompletion;
     private Method reset;
     private Method unload;
+    private RuntimeDiagnostics diagnostics = RuntimeDiagnostics.unknown();
     private final LinkedBlockingQueue<String> streamEvents = new LinkedBlockingQueue<>();
+
+    MlcInferenceEngine(Context context) {
+        this.context = context.getApplicationContext();
+    }
 
     @Override
     public void load(ModelConfig model, File modelDir) throws Exception {
@@ -51,11 +60,29 @@ final class MlcInferenceEngine implements InferenceEngine {
 
         JSONObject config = new JSONObject();
         config.put("model", modelDir.getAbsolutePath());
-        config.put("model_lib", "system://" + model.modelLib);
+        if (model.modelLib != null && !model.modelLib.isEmpty()) {
+            config.put("model_lib", "system://" + model.modelLib);
+        }
         config.put("mode", "interactive");
         Log.i(TAG, "Calling MLC reload with config: " + config);
         reload.invoke(engine, config.toString());
         Log.i(TAG, "MLC reload returned.");
+        Map<String, String> details = new LinkedHashMap<>();
+        details.put("model_path", modelDir.getAbsolutePath());
+        details.put("model_id", model.modelId);
+        details.put("hf_repo", model.hfRepo);
+        details.put("hf_revision", model.hfRevision);
+        String runtimeLibrary = System.mapLibraryName("tvm4j_runtime_packed");
+        details.put("runtime_library", runtimeLibrary);
+        diagnostics =
+                new RuntimeDiagnostics(
+                        model.backendId,
+                        "JSONFFIEngine",
+                        model.modelLib,
+                        NativeLibraryInfo.path(context, runtimeLibrary),
+                        NativeLibraryInfo.sha256(context, runtimeLibrary),
+                        BuildConfig.MLC_LLM_GIT_COMMIT,
+                        details);
     }
 
     @Override
@@ -124,11 +151,22 @@ final class MlcInferenceEngine implements InferenceEngine {
             }
             throw new IllegalStateException("MLC generation timed out after " + timeoutSeconds + " seconds.");
         }
+        String output = text.toString();
         return new GenerationResult(
-                text.toString(),
+                output,
                 firstTokenNs == 0L ? -1L : TimeUnit.NANOSECONDS.toMillis(firstTokenNs - startNs),
+                -1L,
+                -1L,
                 TimeUnit.NANOSECONDS.toMillis(endNs - startNs),
-                estimateTokens(text.toString()));
+                estimateTokens(item.displayPrompt()),
+                estimateTokens(output),
+                "stop",
+                diagnostics);
+    }
+
+    @Override
+    public RuntimeDiagnostics diagnostics() {
+        return diagnostics;
     }
 
     @Override

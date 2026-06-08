@@ -1,31 +1,270 @@
 {
+  "schema_version": 4,
   "models": [
     {
+      "backend_id": "mlc",
       "model_id": "Qwen3-1.7B-q4f16_1-MLC",
-      "display_name": "Qwen3 1.7B Instruct q4f16_1",
+      "display_name": "Qwen3 1.7B Instruct q4f16_1 (MLC)",
+      "hf_repo": "mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
+      "hf_revision": "80b3abcec6c3b3f5355dc0cc99cc4fb578f192bc",
       "mlc_model_url": "HF://mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
+      "artifact_size_bytes": 984153296,
       "model_lib": "qwen3_q4f16_1_1431bce2f7643ad37bb21ddc71153223",
       "quantization": "q4f16_1",
       "context_window": 2048,
-      "estimated_vram_bytes": 3000000000,
+      "prefill_chunk_size": 128,
+      "estimated_memory_bytes": 3000000000,
+      "bundle_weight": false,
+      "smoke_role": "mandatory",
+      "required_files": [
+        "mlc-chat-config.json",
+        "tensor-cache.json",
+        "ndarray-cache.json",
+        "tokenizer_config.json"
+      ],
+      "stop_tokens": ["<|im_end|>", "</s>"],
       "default_params": {
         "temperature": 0.0,
         "top_p": 1.0,
-        "max_tokens": 128
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 32
       }
     },
     {
+      "backend_id": "mlc",
       "model_id": "Qwen3-0.6B-q0f16-MLC",
-      "display_name": "Qwen3 0.6B q0f16",
+      "display_name": "Qwen3 0.6B q0f16 (MLC fallback)",
+      "hf_repo": "mlc-ai/Qwen3-0.6B-q0f16-MLC",
       "mlc_model_url": "HF://mlc-ai/Qwen3-0.6B-q0f16-MLC",
+      "artifact_size_bytes": 1208163897,
       "model_lib": "qwen3_q0f16_e709b04052d95e24b38d40e4259e1f14",
       "quantization": "q0f16",
       "context_window": 2048,
-      "estimated_vram_bytes": 3000000000,
+      "prefill_chunk_size": 128,
+      "estimated_memory_bytes": 3000000000,
+      "bundle_weight": false,
+      "smoke_role": "debug_fallback",
+      "required_files": [
+        "mlc-chat-config.json",
+        "tensor-cache.json",
+        "ndarray-cache.json",
+        "tokenizer_config.json"
+      ],
+      "stop_tokens": ["<|im_end|>", "</s>"],
       "default_params": {
         "temperature": 0.0,
         "top_p": 1.0,
-        "max_tokens": 128
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 32
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "minicpm4-0.5b-q4_k_m",
+      "display_name": "MiniCPM4 0.5B Q4_K_M (llama.cpp)",
+      "hf_repo": "Mungert/MiniCPM4-0.5B-GGUF",
+      "hf_revision": "72bc14b5c718727f48743ddae278aaa555604bd9",
+      "artifact_filename": "MiniCPM4-0.5B-q4_k_m.gguf",
+      "artifact_sha256": "66ef85bb806c973c3f24bb014b8bd2be4e41b5c51e2f64782f470589add87e74",
+      "artifact_size_bytes": 276028992,
+      "quantization": "Q4_K_M",
+      "context_window": 2048,
+      "estimated_memory_bytes": 900000000,
+      "prompt_template": "minicpm",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "mandatory",
+      "stop_tokens": ["<|im_end|>", "</s>"],
+      "default_params": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 32
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "gemma-3-1b-it-q4_k_m",
+      "display_name": "Gemma 3 1B IT Q4_K_M (llama.cpp)",
+      "hf_repo": "ggml-org/gemma-3-1b-it-GGUF",
+      "hf_revision": "f9c28bcd85737ffc5aef028638d3341d49869c27",
+      "artifact_filename": "gemma-3-1b-it-Q4_K_M.gguf",
+      "artifact_sha256": "8ccc5cd1f1b3602548715ae25a66ed73fd5dc68a210412eea643eb20eb75a135",
+      "artifact_size_bytes": 806058240,
+      "quantization": "Q4_K_M",
+      "context_window": 2048,
+      "estimated_memory_bytes": 1600000000,
+      "prompt_template": "gemma3",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "secondary",
+      "stop_tokens": ["<end_of_turn>", "</s>"],
+      "default_params": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 64
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "qwen3-1.7b-q4_k_m",
+      "display_name": "Qwen3 1.7B Q4_K_M (llama.cpp)",
+      "hf_repo": "ggml-org/Qwen3-1.7B-GGUF",
+      "hf_revision": "daeb8e2d528a760970442092f6bf1e55c3b659eb",
+      "artifact_filename": "Qwen3-1.7B-Q4_K_M.gguf",
+      "artifact_sha256": "d2387ca2dbfee2ffabce7120d3770dadca0b293052bc2f0e138fdc940d9bc7b5",
+      "artifact_size_bytes": 1282439264,
+      "quantization": "Q4_K_M",
+      "context_window": 2048,
+      "estimated_memory_bytes": 2200000000,
+      "prompt_template": "qwen3",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "secondary",
+      "stop_tokens": ["<|im_end|>", "</s>"],
+      "default_params": {
+        "temperature": 0.0,
+        "top_p": 1.0,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 64
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "minicpm5-1b-thinking-q4",
+      "display_name": "MiniCPM5 1B Thinking Q4_K_M (table reproduction)",
+      "base_model_id": "openbmb/MiniCPM5-1B",
+      "hf_repo": "openbmb/MiniCPM5-1B-GGUF",
+      "hf_revision": "87007042419d30c1d8f38ef065424ee33870831e",
+      "artifact_filename": "MiniCPM5-1B-Q4_K_M.gguf",
+      "artifact_sha256": "81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa",
+      "artifact_size_bytes": 688065920,
+      "artifact_license": "apache-2.0",
+      "artifact_source": "official_or_author_gguf",
+      "quantization": "Q4_K_M",
+      "context_window": 81920,
+      "estimated_memory_bytes": 2600000000,
+      "prompt_template": "minicpm",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "table_reproduction",
+      "reproduction_role": "table_reproduction_v1",
+      "stop_tokens": ["<|im_end|>", "</s>"],
+      "official_table_score": {
+        "average_13_non_coding_non_agentic": 45.69
+      },
+      "default_params": {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 4096,
+        "thinking_enabled": true
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "qwen3-0.6b-thinking-q4",
+      "display_name": "Qwen3 0.6B Thinking Q4_K_M (table reproduction)",
+      "base_model_id": "Qwen/Qwen3-0.6B",
+      "hf_repo": "unsloth/Qwen3-0.6B-GGUF",
+      "hf_revision": "50968a4468ef4233ed78cd7c3de230dd1d61a56b",
+      "artifact_filename": "Qwen3-0.6B-Q4_K_M.gguf",
+      "artifact_sha256": "ac2d97712095a558e31573f62f466a3f9d93990898b0ec79d7c974c1780d524a",
+      "artifact_size_bytes": 396705472,
+      "artifact_license": "apache-2.0",
+      "artifact_source": "community_gguf",
+      "quantization": "Q4_K_M",
+      "context_window": 81920,
+      "estimated_memory_bytes": 1800000000,
+      "prompt_template": "qwen3",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "table_reproduction",
+      "reproduction_role": "table_reproduction_v1",
+      "stop_tokens": ["<|im_end|>", "</s>"],
+      "official_table_score": {
+        "average_13_non_coding_non_agentic": 31.95
+      },
+      "default_params": {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 4096,
+        "thinking_enabled": true
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "qwen3.5-0.8b-thinking-q4",
+      "display_name": "Qwen3.5 0.8B Thinking Q4_K_M (table reproduction)",
+      "base_model_id": "Qwen/Qwen3.5-0.8B",
+      "hf_repo": "unsloth/Qwen3.5-0.8B-GGUF",
+      "hf_revision": "6ab461498e2023f6e3c1baea90a8f0fe38ab64d0",
+      "artifact_filename": "Qwen3.5-0.8B-Q4_K_M.gguf",
+      "artifact_sha256": "bd258782e35f7f458f8aced1adc053e6e92e89bc735ba3be89d38a06121dc517",
+      "artifact_size_bytes": 532517120,
+      "artifact_license": "apache-2.0",
+      "artifact_source": "community_gguf",
+      "quantization": "Q4_K_M",
+      "context_window": 81920,
+      "estimated_memory_bytes": 2200000000,
+      "prompt_template": "qwen3.5",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "table_reproduction",
+      "reproduction_role": "table_reproduction_v1",
+      "stop_tokens": ["<|im_end|>", "</s>"],
+      "official_table_score": {
+        "average_13_non_coding_non_agentic": 28.43
+      },
+      "default_params": {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 4096,
+        "thinking_enabled": true
+      }
+    },
+    {
+      "backend_id": "llama_cpp",
+      "model_id": "lfm2.5-1.2b-thinking-q4",
+      "display_name": "LFM2.5 1.2B Thinking Q4_K_M (table reproduction)",
+      "base_model_id": "LiquidAI/LFM2.5-1.2B-Thinking",
+      "hf_repo": "LiquidAI/LFM2.5-1.2B-Thinking-GGUF",
+      "hf_revision": "7cb86bcf8ccd6ef5eae50a9ccbdf690ee2646ee5",
+      "artifact_filename": "LFM2.5-1.2B-Thinking-Q4_K_M.gguf",
+      "artifact_sha256": "7223a2202405b02e8e1e6c5baa543c43dc98c1d9741a5c2a0ee1583212e1231b",
+      "artifact_size_bytes": 730895360,
+      "artifact_license": "lfm-open-license",
+      "artifact_source": "official_or_author_gguf",
+      "quantization": "Q4_K_M",
+      "context_window": 81920,
+      "estimated_memory_bytes": 3000000000,
+      "prompt_template": "lfm2.5",
+      "min_runtime_commit": "78433f606fde4d7934a02dcbfd910438d28beccd",
+      "bundle_weight": false,
+      "smoke_role": "table_reproduction",
+      "reproduction_role": "table_reproduction_v1",
+      "stop_tokens": ["<|eot_id|>", "</s>"],
+      "official_table_score": {
+        "average_13_non_coding_non_agentic": 44.25
+      },
+      "default_params": {
+        "temperature": 0.9,
+        "top_p": 0.95,
+        "top_k": 0,
+        "seed": 0,
+        "max_tokens": 4096,
+        "thinking_enabled": true
       }
     }
   ]

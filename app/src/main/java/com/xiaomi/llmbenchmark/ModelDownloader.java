@@ -9,6 +9,7 @@ import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -20,33 +21,71 @@ final class ModelDownloader {
     }
 
     File ensureModel(ModelConfig model, ProgressSink progress) throws Exception {
-        File modelDir = new File(context.getFilesDir(), "models/" + model.modelId);
+        File modelDir = ModelStore.modelDirectory(context, model);
         File readyMarker = new File(modelDir, ".download-complete");
-        if (readyMarker.exists()) {
-            progress.onProgress("Model already downloaded: " + model.modelId);
-            return modelDir;
+        if (modelDir.exists()) {
+            try {
+                ModelPreflight.verify(model, modelDir);
+                progress.onProgress("Model already staged and verified: " + model.backendId + "/" + model.modelId);
+                return modelDir;
+            } catch (Exception preflightError) {
+                progress.onProgress("Existing model failed preflight: " + preflightError.getMessage());
+                if (readyMarker.exists() && !readyMarker.delete()) {
+                    progress.onProgress("Could not delete stale ready marker: " + readyMarker.getAbsolutePath());
+                }
+            }
         }
         if (!modelDir.exists() && !modelDir.mkdirs()) {
             throw new IllegalStateException("Could not create model directory: " + modelDir);
         }
 
-        if (model.mlcModelUrl.startsWith("HF://")) {
-            downloadHuggingFaceRepo(model.mlcModelUrl.substring("HF://".length()), modelDir, progress);
+        if (model.isLlamaCpp()) {
+            downloadGguf(model, modelDir, progress);
+        } else if (model.mlcModelUrl.startsWith("HF://")) {
+            downloadHuggingFaceRepo(
+                    model.mlcModelUrl.substring("HF://".length()),
+                    model.hfRevision.isEmpty() ? "main" : model.hfRevision,
+                    modelDir,
+                    progress);
         } else if (model.mlcModelUrl.startsWith("https://") || model.mlcModelUrl.startsWith("http://")) {
             downloadSingleFile(model.mlcModelUrl, new File(modelDir, fileNameFromUrl(model.mlcModelUrl)), progress);
         } else {
             throw new IllegalArgumentException("Unsupported model URL: " + model.mlcModelUrl);
         }
 
+        writeManifest(model, modelDir);
+        ModelPreflight.verify(model, modelDir);
         if (!readyMarker.createNewFile() && !readyMarker.exists()) {
             throw new IllegalStateException("Could not write model ready marker.");
         }
         return modelDir;
     }
 
-    private void downloadHuggingFaceRepo(String repoId, File modelDir, ProgressSink progress) throws Exception {
+    private void downloadGguf(ModelConfig model, File modelDir, ProgressSink progress) throws Exception {
+        if (model.hfRepo.isEmpty() || model.artifactFilename.isEmpty()) {
+            throw new IllegalArgumentException("GGUF model requires hf_repo and artifact_filename: " + model.modelId);
+        }
+        File outFile = new File(modelDir, model.artifactFilename);
+        if (outFile.exists() && outFile.length() > 0) {
+            progress.onProgress("GGUF file exists, verifying: " + outFile.getName());
+            return;
+        }
+        String revision = model.hfRevision.isEmpty() ? "main" : model.hfRevision;
+        String fileUrl =
+                "https://huggingface.co/"
+                        + model.hfRepo
+                        + "/resolve/"
+                        + revision
+                        + "/"
+                        + encodePath(model.artifactFilename);
+        progress.onProgress("Downloading GGUF " + model.artifactFilename);
+        downloadSingleFile(fileUrl, outFile, progress);
+    }
+
+    private void downloadHuggingFaceRepo(String repoId, String revision, File modelDir, ProgressSink progress)
+            throws Exception {
         progress.onProgress("Listing Hugging Face repo: " + repoId);
-        String apiUrl = "https://huggingface.co/api/models/" + repoId + "/tree/main?recursive=1";
+        String apiUrl = "https://huggingface.co/api/models/" + repoId + "/tree/" + revision + "?recursive=1";
         JSONArray files = new JSONArray(readUrl(apiUrl));
         int downloaded = 0;
         for (int i = 0; i < files.length(); i++) {
@@ -63,12 +102,28 @@ final class ModelDownloader {
                 continue;
             }
             String encodedPath = encodePath(path);
-            String fileUrl = "https://huggingface.co/" + repoId + "/resolve/main/" + encodedPath;
+            String fileUrl = "https://huggingface.co/" + repoId + "/resolve/" + revision + "/" + encodedPath;
             progress.onProgress("Downloading " + path);
             downloadSingleFile(fileUrl, outFile, progress);
             downloaded++;
         }
         progress.onProgress("Model files ready. New files downloaded: " + downloaded);
+    }
+
+    private static void writeManifest(ModelConfig model, File modelDir) throws Exception {
+        JSONObject json = new JSONObject();
+        json.put("model_id", model.modelId);
+        json.put("backend_id", model.backendId);
+        json.put("hf_repo", model.hfRepo);
+        json.put("hf_revision", model.hfRevision);
+        json.put("artifact_filename", model.artifactFilename);
+        json.put("artifact_sha256", model.artifactSha256);
+        json.put("artifact_size_bytes", model.artifactSizeBytes);
+        json.put("verified_at_ms", System.currentTimeMillis());
+        File manifest = new File(modelDir, "manifest.json");
+        try (FileOutputStream output = new FileOutputStream(manifest)) {
+            output.write(json.toString(2).getBytes(StandardCharsets.UTF_8));
+        }
     }
 
     private static String readUrl(String value) throws Exception {

@@ -4,6 +4,7 @@
     {
       "model": "HF://mlc-ai/Qwen3-1.7B-q4f16_1-MLC",
       "model_id": "Qwen3-1.7B-q4f16_1-MLC",
+      "model_lib": "qwen3_q4f16_1_1431bce2f7643ad37bb21ddc71153223",
       "estimated_vram_bytes": 3000000000,
       "overrides": {
         "prefill_chunk_size": 128,
@@ -14,6 +15,7 @@
     {
       "model": "HF://mlc-ai/Qwen3-0.6B-q0f16-MLC",
       "model_id": "Qwen3-0.6B-q0f16-MLC",
+      "model_lib": "qwen3_q0f16_e709b04052d95e24b38d40e4259e1f14",
       "estimated_vram_bytes": 3000000000,
       "overrides": {
         "prefill_chunk_size": 128,
@@ -23,4 +25,3 @@
     }
   ]
 }
-

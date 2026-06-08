@@ -1,12 +1,16 @@
 .gradle/
 build/
 app/build/
+app/.cxx/
 app/libs/
 app/src/main/jniLibs/
 app/src/main/assets/mlc/
 local.properties
 reports/
 mlc/package/
+mlc/dist/
+artifacts/
+failure_bundles/
 vendor/
 *.iml
 .DS_Store
