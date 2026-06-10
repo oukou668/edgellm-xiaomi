@@ -26,6 +26,7 @@ final class BenchmarkItemResult {
     final GenerationParams generationParams;
     final RuntimeDiagnostics runtimeDiagnostics;
     final List<HardwareSample> hardwareSamples;
+    final List<DecodeSpeedBucket> decodeSpeedBuckets;
 
     BenchmarkItemResult(
             BenchmarkItem item,
@@ -47,6 +48,50 @@ final class BenchmarkItemResult {
             GenerationParams generationParams,
             RuntimeDiagnostics runtimeDiagnostics,
             List<HardwareSample> hardwareSamples) {
+        this(
+                item,
+                backendId,
+                modelId,
+                repeatIndex,
+                warmup,
+                output,
+                passed,
+                error,
+                firstTokenLatencyMs,
+                promptEvalLatencyMs,
+                decodeLatencyMs,
+                totalLatencyMs,
+                promptTokens,
+                estimatedOutputTokens,
+                decodeTokensPerSecond,
+                finishReason,
+                generationParams,
+                runtimeDiagnostics,
+                hardwareSamples,
+                Collections.emptyList());
+    }
+
+    BenchmarkItemResult(
+            BenchmarkItem item,
+            String backendId,
+            String modelId,
+            int repeatIndex,
+            boolean warmup,
+            String output,
+            boolean passed,
+            String error,
+            long firstTokenLatencyMs,
+            long promptEvalLatencyMs,
+            long decodeLatencyMs,
+            long totalLatencyMs,
+            int promptTokens,
+            int estimatedOutputTokens,
+            double decodeTokensPerSecond,
+            String finishReason,
+            GenerationParams generationParams,
+            RuntimeDiagnostics runtimeDiagnostics,
+            List<HardwareSample> hardwareSamples,
+            List<DecodeSpeedBucket> decodeSpeedBuckets) {
         this.item = item;
         this.backendId = backendId == null ? "" : backendId;
         this.modelId = modelId == null ? "" : modelId;
@@ -69,6 +114,10 @@ final class BenchmarkItemResult {
                 hardwareSamples == null
                         ? Collections.emptyList()
                         : Collections.unmodifiableList(new ArrayList<>(hardwareSamples));
+        this.decodeSpeedBuckets =
+                decodeSpeedBuckets == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(decodeSpeedBuckets));
     }
 
     JSONObject toJson() throws Exception {
@@ -105,6 +154,11 @@ final class BenchmarkItemResult {
         json.put("generation_params", generationParams.toJson());
         json.put("runtime", runtimeDiagnostics.toJson());
         json.put("hardware", new HardwareSummary(hardwareSamples).toJson(hardwareSamples));
+        JSONArray buckets = new JSONArray();
+        for (DecodeSpeedBucket bucket : decodeSpeedBuckets) {
+            buckets.put(bucket.toJson());
+        }
+        json.put("decode_speed_buckets", buckets);
         return json;
     }
 }

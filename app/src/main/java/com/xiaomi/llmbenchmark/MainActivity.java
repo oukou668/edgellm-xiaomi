@@ -28,6 +28,8 @@ public final class MainActivity extends Activity {
     private static final String EXTRA_SMOKE_TYPE = "smoke_type";
     private static final String EXTRA_REPEAT_COUNT = "repeat_count";
     private static final String EXTRA_WARMUP_COUNT = "warmup_count";
+    private static final String EXTRA_BATCH_SIZE = "batch_size";
+    private static final String EXTRA_STRESS_MODE = "stress_mode";
     private static final String EXTRA_BUNDLE_ID = "bundle_id";
 
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
@@ -245,7 +247,9 @@ public final class MainActivity extends Activity {
                         requestedBackendId,
                         intent.getStringExtra(EXTRA_SMOKE_TYPE),
                         intent.getIntExtra(EXTRA_REPEAT_COUNT, 1),
-                        intent.getIntExtra(EXTRA_WARMUP_COUNT, 0));
+                        intent.getIntExtra(EXTRA_WARMUP_COUNT, 0),
+                        intent.getIntExtra(EXTRA_BATCH_SIZE, 1),
+                        intent.getBooleanExtra(EXTRA_STRESS_MODE, false));
         final BenchmarkConfig selectedBenchmark = benchmark;
         mainHandler.post(() -> runBenchmark(model, selectedBenchmark, options));
     }

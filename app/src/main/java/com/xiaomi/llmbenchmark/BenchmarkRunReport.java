@@ -3,6 +3,7 @@ package com.xiaomi.llmbenchmark;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -20,6 +21,7 @@ final class BenchmarkRunReport {
     final List<BenchmarkItemResult> results;
     final List<HardwareSample> hardwareSamples;
     final JSONObject sourceIdentity;
+    final List<JSONObject> batchMetrics;
 
     BenchmarkRunReport(
             String runId,
@@ -34,7 +36,8 @@ final class BenchmarkRunReport {
             List<BenchmarkItemResult> warmupResults,
             List<BenchmarkItemResult> results,
             List<HardwareSample> hardwareSamples,
-            JSONObject sourceIdentity) {
+            JSONObject sourceIdentity,
+            List<JSONObject> batchMetrics) {
         this.runId = runId;
         this.startedAtMs = startedAtMs;
         this.finishedAtMs = finishedAtMs;
@@ -54,6 +57,10 @@ final class BenchmarkRunReport {
                         ? Collections.emptyList()
                         : Collections.unmodifiableList(new ArrayList<>(hardwareSamples));
         this.sourceIdentity = sourceIdentity == null ? new JSONObject() : sourceIdentity;
+        this.batchMetrics =
+                batchMetrics == null
+                        ? Collections.emptyList()
+                        : Collections.unmodifiableList(new ArrayList<>(batchMetrics));
     }
 
     int passedCount() {
@@ -144,6 +151,42 @@ final class BenchmarkRunReport {
             warmupArray.put(result.toJson());
         }
         json.put("warmup_results", warmupArray);
+        JSONArray batchArray = new JSONArray();
+        for (JSONObject metric : batchMetrics) {
+            batchArray.put(metric);
+        }
+        json.put("batch_metrics", batchArray);
+        json.put("decode_speed_profile", decodeSpeedProfile());
         return json;
+    }
+
+    /** Aggregates per-item KV-length decode buckets across the whole run into one tok/s-vs-KV table. */
+    private JSONArray decodeSpeedProfile() throws Exception {
+        java.util.TreeMap<Integer, long[]> byStart = new java.util.TreeMap<>();
+        for (BenchmarkItemResult result : results) {
+            for (DecodeSpeedBucket bucket : result.decodeSpeedBuckets) {
+                long[] acc = byStart.get(bucket.startToken);
+                if (acc == null) {
+                    acc = new long[] {0L, 0L};
+                    byStart.put(bucket.startToken, acc);
+                }
+                acc[0] += bucket.tokens;
+                acc[1] += bucket.totalMs;
+            }
+        }
+        JSONArray array = new JSONArray();
+        for (Map.Entry<Integer, long[]> entry : byStart.entrySet()) {
+            int start = entry.getKey();
+            long tokens = entry.getValue()[0];
+            long totalMs = entry.getValue()[1];
+            JSONObject bucket = new JSONObject();
+            bucket.put("start", start);
+            bucket.put("end", start + DecodeSpeedBucket.WIDTH);
+            bucket.put("tokens", tokens);
+            bucket.put("total_ms", totalMs);
+            bucket.put("tokens_per_second", totalMs > 0L ? tokens * 1000.0 / totalMs : 0.0);
+            array.put(bucket);
+        }
+        return array;
     }
 }

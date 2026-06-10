@@ -122,7 +122,70 @@ final class ReportWriter {
                     .append(escapeMd(shorten(result.output.isEmpty() ? result.error : result.output, 120)))
                     .append(" |\n");
         }
+        appendDecodeSpeedProfile(builder, report);
+        appendBatchThroughput(builder, report);
         return builder.toString();
+    }
+
+    private static void appendDecodeSpeedProfile(StringBuilder builder, BenchmarkRunReport report) {
+        java.util.TreeMap<Integer, long[]> byStart = new java.util.TreeMap<>();
+        for (BenchmarkItemResult result : report.results) {
+            for (DecodeSpeedBucket bucket : result.decodeSpeedBuckets) {
+                long[] acc = byStart.get(bucket.startToken);
+                if (acc == null) {
+                    acc = new long[] {0L, 0L};
+                    byStart.put(bucket.startToken, acc);
+                }
+                acc[0] += bucket.tokens;
+                acc[1] += bucket.totalMs;
+            }
+        }
+        if (byStart.isEmpty()) {
+            return;
+        }
+        builder.append("\n## Decode speed by KV-cache length\n\n");
+        builder.append("| KV window (tokens) | tokens | decode ms | tok/s |\n");
+        builder.append("| --- | ---: | ---: | ---: |\n");
+        for (java.util.Map.Entry<Integer, long[]> entry : byStart.entrySet()) {
+            int start = entry.getKey();
+            long tokens = entry.getValue()[0];
+            long totalMs = entry.getValue()[1];
+            double tps = totalMs > 0L ? tokens * 1000.0 / totalMs : 0.0;
+            builder.append("| ")
+                    .append(start)
+                    .append("-")
+                    .append(start + DecodeSpeedBucket.WIDTH)
+                    .append(" | ")
+                    .append(tokens)
+                    .append(" | ")
+                    .append(totalMs)
+                    .append(" | ")
+                    .append(String.format(Locale.US, "%.2f", tps))
+                    .append(" |\n");
+        }
+    }
+
+    private static void appendBatchThroughput(StringBuilder builder, BenchmarkRunReport report) {
+        if (report.batchMetrics.isEmpty()) {
+            return;
+        }
+        builder.append("\n## Batch throughput\n\n");
+        builder.append("- Configured batch size: ").append(report.options.batchSize).append('\n');
+        builder.append("\n| Batch # | Batch size | Decode ms | Total tokens | Aggregate tok/s |\n");
+        builder.append("| ---: | ---: | ---: | ---: | ---: |\n");
+        for (JSONObject metric : report.batchMetrics) {
+            builder.append("| ")
+                    .append(metric.optInt("batch_index", 0))
+                    .append(" | ")
+                    .append(metric.optInt("batch_size", report.options.batchSize))
+                    .append(" | ")
+                    .append(metric.optLong("aggregate_decode_latency_ms", -1L))
+                    .append(" | ")
+                    .append(metric.optInt("total_generated_tokens", 0))
+                    .append(" | ")
+                    .append(String.format(Locale.US, "%.2f", metric.optDouble("aggregate_tokens_per_second", 0.0)))
+                    .append(" |\n");
+        }
     }
 
     private static JSONObject toRunManifest(BenchmarkRunReport report) throws Exception {

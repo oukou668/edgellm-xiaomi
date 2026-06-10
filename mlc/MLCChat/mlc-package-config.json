@@ -22,6 +22,17 @@
         "context_window_size": 2048
       },
       "bundle_weight": false
+    },
+    {
+      "model": "HF://PLACEHOLDER/MiniCPM5-1B-q4f16_1-MLC",
+      "model_id": "minicpm5-1b-thinking-mlc",
+      "model_lib": "PLACEHOLDER_minicpm5_q4f16_1_REPLACE_WITH_PACKAGING_HASH",
+      "estimated_vram_bytes": 3000000000,
+      "overrides": {
+        "prefill_chunk_size": 128,
+        "context_window_size": 81920
+      },
+      "bundle_weight": false
     }
   ]
 }

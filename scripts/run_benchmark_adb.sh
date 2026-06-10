@@ -12,9 +12,13 @@ BACKEND_ID="${BACKEND_ID:-mlc}"
 SMOKE_TYPE="${SMOKE_TYPE:-dummy_backend_regression}"
 REPEAT_COUNT="${REPEAT_COUNT:-1}"
 WARMUP_COUNT="${WARMUP_COUNT:-0}"
+BATCH_SIZE="${BATCH_SIZE:-1}"
+STRESS_MODE="${STRESS_MODE:-0}"
 WAIT="${WAIT:-1}"
 PULL="${PULL:-1}"
-TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-900}"
+# A single stress sample may run up to the 120-min in-app timeout; the poller must outlast it.
+# For long 80K/64K runs prefer WAIT=0 and pull later with scripts/pull_reports.sh.
+TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-8000}"
 POLL_SECONDS="${POLL_SECONDS:-5}"
 STAY_AWAKE="${STAY_AWAKE:-1}"
 RUNNER="${RUNNER:-activity}"
@@ -48,6 +52,8 @@ if [[ "$RUNNER" == "service" ]]; then
     --es smoke_type "$SMOKE_TYPE"
     --ei repeat_count "$REPEAT_COUNT"
     --ei warmup_count "$WARMUP_COUNT"
+    --ei batch_size "$BATCH_SIZE"
+    --ez stress_mode "$([[ "$STRESS_MODE" == "1" ]] && echo true || echo false)"
   )
   if [[ -n "$BUNDLE_ID" ]]; then
     service_args+=(--es bundle_id "$BUNDLE_ID")
@@ -64,6 +70,8 @@ else
     --es smoke_type "$SMOKE_TYPE"
     --ei repeat_count "$REPEAT_COUNT"
     --ei warmup_count "$WARMUP_COUNT"
+    --ei batch_size "$BATCH_SIZE"
+    --ez stress_mode "$([[ "$STRESS_MODE" == "1" ]] && echo true || echo false)"
   )
   if [[ -n "$BUNDLE_ID" ]]; then
     activity_args+=(--es bundle_id "$BUNDLE_ID")
@@ -71,7 +79,7 @@ else
   "$ADB" shell "${activity_args[@]}"
 fi
 
-echo "Started benchmark: runner=$RUNNER backend=$BACKEND_ID model=$MODEL_ID benchmark=$EFFECTIVE_BENCHMARK_ID smoke=$SMOKE_TYPE repeat=$REPEAT_COUNT warmup=$WARMUP_COUNT"
+echo "Started benchmark: runner=$RUNNER backend=$BACKEND_ID model=$MODEL_ID benchmark=$EFFECTIVE_BENCHMARK_ID smoke=$SMOKE_TYPE repeat=$REPEAT_COUNT warmup=$WARMUP_COUNT batch=$BATCH_SIZE stress=$STRESS_MODE"
 if [[ "$WAIT" != "1" ]]; then
   echo "After it finishes, pull reports with: ADB=$ADB ./scripts/pull_reports.sh"
   exit 0

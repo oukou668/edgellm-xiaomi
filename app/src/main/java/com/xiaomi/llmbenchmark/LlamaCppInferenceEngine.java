@@ -2,12 +2,18 @@ package com.xiaomi.llmbenchmark;
 
 import android.content.Context;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 final class LlamaCppInferenceEngine implements InferenceEngine {
     private static final String LIB_NAME = "llmbenchmark-llama";
+    // Per-sample inference timeout: 120 minutes. The native decode loop stops at this deadline and
+    // reports finish_reason="timeout" (it does NOT throw, so the decode-speed profile is preserved).
+    private static final long PER_SAMPLE_TIMEOUT_MS = 120L * 60L * 1000L;
     private static boolean libraryLoaded;
 
     private final Context context;
@@ -44,6 +50,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         details.put("default_temperature", String.valueOf(model.defaultParams.temperature));
         details.put("default_top_p", String.valueOf(model.defaultParams.topP));
         details.put("default_thinking_enabled", String.valueOf(model.defaultParams.thinkingEnabled));
+        details.put("chat_template", "official_gguf_template");
         diagnostics =
                 new RuntimeDiagnostics(
                         model.backendId,
@@ -88,21 +95,22 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         if (model == null) {
             throw new IllegalStateException("llama.cpp engine is not loaded.");
         }
-        String prompt = renderPrompt(model, item, params);
-        String rawJson;
         int contextWindow = params.contextWindowSize > 0 ? params.contextWindowSize : model.contextWindow;
         String kvCacheType = contextWindow > 32768 ? "q4_0" : "f16";
+        String rawJson;
         synchronized (lock) {
             rawJson =
                     nativeGenerate(
-                            prompt,
+                            item.displayPrompt(),
                             contextWindow,
                             kvCacheType,
                             params.maxTokens,
                             params.temperature,
                             params.topP,
                             params.topK,
-                            params.seed);
+                            params.seed,
+                            params.thinkingEnabled,
+                            PER_SAMPLE_TIMEOUT_MS);
         }
         JSONObject json = new JSONObject(rawJson);
         return new GenerationResult(
@@ -114,7 +122,69 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                 json.optInt("prompt_tokens", 0),
                 json.optInt("generated_tokens", 0),
                 json.optString("finish_reason", "unknown"),
-                diagnostics);
+                diagnostics,
+                DecodeSpeedBucket.listFromJson(json.optJSONArray("decode_speed_buckets")));
+    }
+
+    @Override
+    public BatchGenerationResult generateBatch(List<BenchmarkItem> items, List<GenerationParams> params)
+            throws Exception {
+        if (model == null) {
+            throw new IllegalStateException("llama.cpp engine is not loaded.");
+        }
+        // Hyperparameters are held constant across a batch (only batch size varies), so the first
+        // sequence's context/kv/sampling drive the native call.
+        GenerationParams head = params.get(0);
+        int contextWindow = head.contextWindowSize > 0 ? head.contextWindowSize : model.contextWindow;
+        String kvCacheType = contextWindow > 32768 ? "q4_0" : "f16";
+        String[] prompts = new String[items.size()];
+        for (int i = 0; i < items.size(); i++) {
+            prompts[i] = items.get(i).displayPrompt();
+        }
+        String rawJson;
+        synchronized (lock) {
+            rawJson =
+                    nativeGenerateBatch(
+                            prompts,
+                            contextWindow,
+                            kvCacheType,
+                            head.maxTokens,
+                            head.temperature,
+                            head.topP,
+                            head.topK,
+                            head.seed,
+                            head.thinkingEnabled,
+                            PER_SAMPLE_TIMEOUT_MS);
+        }
+        JSONObject json = new JSONObject(rawJson);
+        long decodeWall = json.optLong("aggregate_decode_latency_ms", -1L);
+        long prefillWall = json.optLong("aggregate_prefill_latency_ms", -1L);
+        int totalGenerated = json.optInt("total_generated_tokens", 0);
+        double aggregateTps = json.optDouble("aggregate_tokens_per_second", 0.0);
+        JSONArray sequences = json.optJSONArray("sequences");
+        List<GenerationResult> results = new ArrayList<>();
+        int count = sequences == null ? 0 : sequences.length();
+        for (int i = 0; i < count; i++) {
+            JSONObject seq = sequences.optJSONObject(i);
+            results.add(
+                    new GenerationResult(
+                            seq.optString("text", ""),
+                            seq.optLong("first_token_latency_ms", -1L),
+                            -1L,
+                            seq.optLong("decode_latency_ms", decodeWall),
+                            -1L,
+                            seq.optInt("prompt_tokens", 0),
+                            seq.optInt("generated_tokens", 0),
+                            seq.optString("finish_reason", "unknown"),
+                            diagnostics,
+                            DecodeSpeedBucket.listFromJson(seq.optJSONArray("decode_speed_buckets"))));
+        }
+        if (results.isEmpty()) {
+            throw new IllegalStateException(
+                    "llama.cpp batch failed: " + json.optString("error", "no sequences returned"));
+        }
+        return new BatchGenerationResult(
+                results, decodeWall, prefillWall, totalGenerated, items.size(), aggregateTps, diagnostics);
     }
 
     @Override
@@ -139,33 +209,6 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         }
     }
 
-    private static String renderPrompt(ModelConfig model, BenchmarkItem item, GenerationParams params) {
-        String prompt = item.displayPrompt();
-        if ("minicpm".equals(model.promptTemplate)) {
-            String thinkingSwitch = params.thinkingEnabled ? "\n/think" : "\n/no_think";
-            return "<|im_start|>user\n"
-                    + prompt
-                    + thinkingSwitch
-                    + "<|im_end|>\n<|im_start|>assistant\n";
-        }
-        if ("gemma3".equals(model.promptTemplate)) {
-            return "<start_of_turn>user\n" + prompt + "<end_of_turn>\n<start_of_turn>model\n";
-        }
-        if ("qwen3".equals(model.promptTemplate)) {
-            String thinkingSwitch = params.thinkingEnabled ? "\n/think" : "\n/no_think";
-            return "<|im_start|>user\n" + prompt + thinkingSwitch + "<|im_end|>\n<|im_start|>assistant\n";
-        }
-        if ("qwen3.5".equals(model.promptTemplate)) {
-            return "<|im_start|>user\n" + prompt + "<|im_end|>\n<|im_start|>assistant\n";
-        }
-        if ("lfm2.5".equals(model.promptTemplate)) {
-            return "<|start_header_id|>user<|end_header_id|>\n\n"
-                    + prompt
-                    + "<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n";
-        }
-        return prompt;
-    }
-
     private static native void nativeInit(String nativeLibDir);
 
     private static native int nativeLoad(
@@ -184,7 +227,21 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             double temperature,
             double topP,
             int topK,
-            long seed);
+            long seed,
+            boolean thinking,
+            long timeoutMs);
+
+    private static native String nativeGenerateBatch(
+            String[] prompts,
+            int perSeqContext,
+            String kvCacheType,
+            int maxTokens,
+            double temperature,
+            double topP,
+            int topK,
+            long seed,
+            boolean thinking,
+            long timeoutMs);
 
     private static native String nativeSystemInfo();
 

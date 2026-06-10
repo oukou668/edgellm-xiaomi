@@ -4,12 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-An Android app that benchmarks small Qwen-family LLMs running **on-device** via the
-[MLC LLM](https://github.com/mlc-ai/mlc-llm) runtime, targeting a Xiaomi phone
+An Android app that benchmarks small LLMs running **on-device**, targeting a Xiaomi phone
 (arm64-v8a, Adreno GPU). It is **benchmark-first**: models and benchmark suites are data
-(JSON), and the runtime is reached through a reflection-only adapter so the app code never
-compiles against MLC classes. Output is per-run reports in JSON/CSV/Markdown with latency,
-estimated tokens/s, and hardware/thermal telemetry.
+(JSON). There are **two inference backends** selected per-model by `backend_id`:
+- **MLC** ([MLC LLM](https://github.com/mlc-ai/mlc-llm)) — reached through a reflection-only
+  adapter (`MlcInferenceEngine`) so the app code never compiles against MLC classes.
+- **llama.cpp** — a JNI backend (`LlamaCppInferenceEngine` + `app/src/main/cpp/llama_jni.cpp`)
+  that loads GGUF weights and uses each model's official chat template from GGUF metadata.
+
+Output is per-run reports in JSON/CSV/Markdown with latency, estimated tokens/s,
+hardware/thermal telemetry, batch-throughput metrics, and a KV-length decode-speed profile.
 
 ## Critical build prerequisite
 
@@ -24,6 +28,11 @@ The packaging step (`scripts/package_mlc_android.sh`) additionally requires, on 
 - The `mlc-llm` Python package installed.
 - Android SDK + NDK + CMake (paths in the script are hardcoded to a macOS `~/Library/Android/sdk` layout; override the `ANDROID_*`/`TVM_NDK_CC` env vars on other hosts).
 - ~60 GiB+ free disk for SDK/NDK/build caches/weights.
+
+The **llama.cpp** backend is compiled from source by the app's CMake build
+(`app/src/main/cpp/CMakeLists.txt`); it needs a llama.cpp checkout at `LLAMA_CPP_DIR` (Gradle
+property / hardcoded macOS default) and the Android NDK. `GGML_CPU_KLEIDIAI` is forced OFF
+(SME2 SIGILL on the Xiaomi device). GGUF weights download from Hugging Face at first use.
 
 ## Commands
 
@@ -61,51 +70,65 @@ MainActivity ──UI/intent autorun──▶ BenchmarkRunner.run(model, benchma
                                           │
    ModelDownloader.ensureModel ───────────┤ (HF repo or direct URL → files/models/<id>/)
                                           │
-   EngineFactory.create → MlcInferenceEngine.load / generate / unload
-                                          │   (reflection into ai.mlc.mlcllm.JSONFFIEngine)
+   EngineFactory.create(context, backendId) → MlcInferenceEngine | LlamaCppInferenceEngine | Dummy
+                                          │   .load / generate / generateBatch / unload
    HardwareMonitor (background sampler) ───┤
    Judge.score(item, output) ─────────────┤
                                           ▼
                               BenchmarkRunReport → ReportWriter (json/csv/md)
 ```
 
+`BenchmarkService` runs the same flow headlessly as a foreground service (intent extras).
+
 Key design points (each requires reading multiple files to grasp):
 
-- **The MLC runtime is reached only by reflection.** `MlcInferenceEngine` is the *single*
-  file that names MLC classes (`ai.mlc.mlcllm.JSONFFIEngine`). It loads native libs by name,
-  proxies the streaming callback, spins up background loop daemon threads, and speaks an
-  OpenAI-style `chatCompletion` JSON protocol parsing SSE-like delta events (matched by request
-  id; completion is signalled by a non-null `usage` or a `finish_reason`). There is a per-item
-  wall-clock timeout of `max(180s, maxNewTokens·2s)`; on timeout it resets the engine and
-  throws. If the runtime class is absent or generation times out, the exception is caught and
-  `BenchmarkRunner` records the failure **per item** rather than crashing the run. To swap
-  engines, add an `InferenceEngine` impl and change `EngineFactory`.
+- **Two backends behind one `InferenceEngine` interface.** `EngineFactory.create(context,
+  backendId)` returns `MlcInferenceEngine` (reflection into `ai.mlc.mlcllm.JSONFFIEngine`),
+  `LlamaCppInferenceEngine` (JNI to `llama_jni.cpp`), or `DummyInferenceEngine` (for the report
+  pipeline). `InferenceEngine` has `generate` (single) and `generateBatch` (true parallel
+  decoding); the default `generateBatch` falls back to a sequential loop. Engine failures are
+  caught and recorded **per item** rather than crashing the run.
 
-- **`model_lib` must match the compiled library.** `generate` passes `model_lib =
-  "system://" + model.modelLib`. The hashed `model_lib` strings in
-  `app/src/main/assets/models.json` are emitted by the packaging step and **must stay in sync**
-  with `mlc/MLCChat/mlc-package-config.json`. Adding a model means editing *both* files and
-  re-running `package_mlc_android.sh`.
+- **llama.cpp parallel batching.** `nativeGenerateBatch` prefills each prompt into its own
+  sequence then decodes all sequences with one `llama_decode` per step. Total `n_ctx =
+  perSeqContext × batchSize` (each sequence gets the full per-seq context), so large
+  batch×context combinations can legitimately OOM. Prompts are formatted with the model's
+  **official GGUF chat template** (`common_chat_templates_*`, `enable_thinking` toggle) — there
+  is no hand-rolled prompt string builder.
 
-- **Registries are auto-discovered from assets.** Adding a benchmark = drop a JSON file in
-  `app/src/main/assets/benchmarks/` (the dir is listed at runtime). Adding a model = edit
-  `models.json` (+ package config, above).
+- **MLC batching + thinking.** `MlcInferenceEngine` switches `reload` to `"server"` mode for
+  batched runs and fires N concurrent `chatCompletion` requests demuxed by request id. It sends
+  the item's messages **verbatim** (no injected system prompt / `/no_think`); thinking is
+  governed by the model's official conversation template from `mlc-chat-config.json`.
 
-- **Qwen3-specific prompting.** Each request prepends a system prompt forbidding
-  chain-of-thought / `<think>` blocks, and appends `\n/no_think` to every user turn.
+- **Per-sample timeout = 120 min** on both backends. On timeout the engine returns the partial
+  generation with `finish_reason="timeout"` (it does NOT throw), so the decode-speed profile is
+  preserved.
+
+- **MLC `model_lib` must match the compiled library; GGUF artifacts are sha/size-verified.**
+  For MLC models, `generate` passes `model_lib = "system://" + model.modelLib`; the hashed
+  `model_lib` in `models.json` must stay in sync with `mlc/MLCChat/mlc-package-config.json`, and
+  adding an MLC model means editing *both* and re-running `package_mlc_android.sh`. For llama.cpp
+  models, `ModelPreflight` hard-verifies the GGUF's `artifact_size_bytes` and `artifact_sha256`
+  before load (wrong values fail the run); no packaging step is needed.
+
+- **Registries are auto-discovered from assets.** Adding a benchmark = drop a `.json`/`.jsonl`
+  file in `app/src/main/assets/benchmarks/` (dir listed at runtime). Adding a model = edit
+  `models.json` (+ MLC package config for MLC models).
 
 - **Judging is string-match, not a model judge.** `Judge` normalizes (lowercase, collapse
   whitespace) and supports `judge_rule`: `contains` (default; ALL comma-separated needles),
-  `contains_any`, `contains_ordered` (needles must appear in order), `exact`. `expected_answer`
-  is a comma-separated needle list.
+  `contains_any`, `contains_ordered` (in order), `exact`, and `boxed_integer`/`final_integer`
+  (extract the last `\boxed{...}` integer, else the last 0-999 integer, compare numerically —
+  used for AIME math). `expected_answer` is a comma-separated needle list (a plain integer for
+  the boxed rule).
 
-- **Token counts and tok/s are estimates.** `estimateTokens` is a CJK-char + ASCII-word
-  heuristic, not the real tokenizer — treat decode tok/s as approximate.
+- **Token counts and tok/s are estimates** for MLC (`estimateTokens`, a CJK-char + ASCII-word
+  heuristic); llama.cpp reports real token counts and exact per-step decode timing.
 
-- **Token-limit gotcha.** `generate` uses `item.maxNewTokens`, and `BenchmarkItem` floors it
-  at `MIN_MAX_NEW_TOKENS = 192`. The `max_tokens` in a model's `default_params` and a
-  benchmark's `default_max_new_tokens` are parsed but effectively overridden by the per-item
-  value and that floor — adjust limits at the item level.
+- **Token-limit gotcha.** Per-item `max_new_tokens` wins, floored at `MIN_MAX_NEW_TOKENS = 1`;
+  a model's `default_params.max_tokens` and a benchmark's `default_max_new_tokens` are the
+  fallbacks. Adjust limits at the item level (`resolvedParams` overrides `maxTokens`).
 
 - **Hardware telemetry.** `HardwareMonitor` samples on a background thread tagged with the
   current phase (`model_load`, `inference`, `post_inference`, `unload`, …). Each
@@ -116,6 +139,16 @@ Key design points (each requires reading multiple files to grasp):
 - **Reports** land in the app sandbox at `files/reports/<yyyyMMdd_HHmmss>_<benchmark_id>/`
   (`report.json`/`.csv`/`.md`) and are extracted to `reports/extracted/` on the host by
   `pull_reports.sh` (relies on debug-build `run-as`).
+
+- **Stress test (batch throughput + decode-speed profile).** `BenchmarkRunOptions.batchSize`
+  (intent extra `batch_size`) groups items into batches and calls `generateBatch`; `batchSize=1`
+  is byte-identical to the per-item path. Reports add `batch_metrics[]` (aggregate tok/s per
+  batch — the throughput-vs-batch-size signal) and `decode_speed_profile` (`DecodeSpeedBucket`,
+  width 4096) showing decode tok/s vs KV-cache length up to 64K. The `aime_2026` benchmark uses
+  the official MathArena prompt (problem + "Put your final answer within \boxed{}...") with the
+  `boxed_integer` judge. Drive it with `BATCH_SIZE=4 BENCHMARK_ID=aime_2026
+  MODEL_ID=minicpm5-1b-thinking-q4 BACKEND_ID=llama_cpp SMOKE_TYPE=real_model_smoke` (see the
+  plan at `~/.claude/plans/` for the full matrix and feasibility caveats).
 
 ## Conventions & environment
 
