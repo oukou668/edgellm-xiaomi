@@ -12,9 +12,10 @@ final class BenchmarkRunOptions {
     final int warmupCount;
     final int batchSize;
     final boolean stressMode;
+    final boolean unloadAfterRun;
 
     BenchmarkRunOptions(String backendId, String smokeType, int repeatCount, int warmupCount) {
-        this(backendId, smokeType, repeatCount, warmupCount, 1, false);
+        this(backendId, smokeType, repeatCount, warmupCount, 1, false, false);
     }
 
     BenchmarkRunOptions(
@@ -24,16 +25,28 @@ final class BenchmarkRunOptions {
             int warmupCount,
             int batchSize,
             boolean stressMode) {
+        this(backendId, smokeType, repeatCount, warmupCount, batchSize, stressMode, false);
+    }
+
+    BenchmarkRunOptions(
+            String backendId,
+            String smokeType,
+            int repeatCount,
+            int warmupCount,
+            int batchSize,
+            boolean stressMode,
+            boolean unloadAfterRun) {
         this.backendId = backendId == null || backendId.isEmpty() ? ModelConfig.BACKEND_MLC : backendId;
         this.smokeType = smokeType == null || smokeType.isEmpty() ? SMOKE_DUMMY : smokeType;
         this.repeatCount = Math.max(1, repeatCount);
         this.warmupCount = Math.max(0, warmupCount);
         this.batchSize = Math.max(1, batchSize);
         this.stressMode = stressMode;
+        this.unloadAfterRun = unloadAfterRun;
     }
 
     static BenchmarkRunOptions defaults(String backendId) {
-        return new BenchmarkRunOptions(backendId, SMOKE_DUMMY, 1, 0, 1, false);
+        return new BenchmarkRunOptions(backendId, SMOKE_DUMMY, 1, 0, 1, false, false);
     }
 
     boolean isRealSmoke() {
@@ -56,6 +69,7 @@ final class BenchmarkRunOptions {
         json.put("warmup_count", warmupCount);
         json.put("batch_size", batchSize);
         json.put("stress_mode", stressMode);
+        json.put("unload_after_run", unloadAfterRun);
         return json;
     }
 }

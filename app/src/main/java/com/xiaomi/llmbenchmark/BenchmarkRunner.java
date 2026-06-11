@@ -40,7 +40,9 @@ final class BenchmarkRunner {
                         + ", repeat="
                         + options.repeatCount
                         + ", batch_size="
-                        + options.batchSize);
+                        + options.batchSize
+                        + ", unload_after_run="
+                        + options.unloadAfterRun);
 
         LiveStatus.get()
                 .startJob(
@@ -171,8 +173,13 @@ final class BenchmarkRunner {
                 }
             }
         } finally {
-            monitor.setPhase("unload", "");
-            engine.unload();
+            if (options.unloadAfterRun) {
+                monitor.setPhase("unload", "");
+                engine.unload();
+            } else {
+                monitor.setPhase("model_retained", "");
+                progress.onProgress("Model retained in process; unload_after_run=false.");
+            }
             monitor.close();
             LiveStatus.get().finishJob();
         }

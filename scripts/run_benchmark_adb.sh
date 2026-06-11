@@ -14,6 +14,7 @@ REPEAT_COUNT="${REPEAT_COUNT:-1}"
 WARMUP_COUNT="${WARMUP_COUNT:-0}"
 BATCH_SIZE="${BATCH_SIZE:-1}"
 STRESS_MODE="${STRESS_MODE:-0}"
+UNLOAD_AFTER_RUN="${UNLOAD_AFTER_RUN:-0}"
 WAIT="${WAIT:-1}"
 PULL="${PULL:-1}"
 # A single stress sample may run up to the 120-min in-app timeout; the poller must outlast it.
@@ -54,6 +55,7 @@ if [[ "$RUNNER" == "service" ]]; then
     --ei warmup_count "$WARMUP_COUNT"
     --ei batch_size "$BATCH_SIZE"
     --ez stress_mode "$([[ "$STRESS_MODE" == "1" ]] && echo true || echo false)"
+    --ez unload_after_run "$([[ "$UNLOAD_AFTER_RUN" == "1" ]] && echo true || echo false)"
   )
   if [[ -n "$BUNDLE_ID" ]]; then
     service_args+=(--es bundle_id "$BUNDLE_ID")
@@ -72,6 +74,7 @@ else
     --ei warmup_count "$WARMUP_COUNT"
     --ei batch_size "$BATCH_SIZE"
     --ez stress_mode "$([[ "$STRESS_MODE" == "1" ]] && echo true || echo false)"
+    --ez unload_after_run "$([[ "$UNLOAD_AFTER_RUN" == "1" ]] && echo true || echo false)"
   )
   if [[ -n "$BUNDLE_ID" ]]; then
     activity_args+=(--es bundle_id "$BUNDLE_ID")
@@ -79,7 +82,7 @@ else
   "$ADB" shell "${activity_args[@]}"
 fi
 
-echo "Started benchmark: runner=$RUNNER backend=$BACKEND_ID model=$MODEL_ID benchmark=$EFFECTIVE_BENCHMARK_ID smoke=$SMOKE_TYPE repeat=$REPEAT_COUNT warmup=$WARMUP_COUNT batch=$BATCH_SIZE stress=$STRESS_MODE"
+echo "Started benchmark: runner=$RUNNER backend=$BACKEND_ID model=$MODEL_ID benchmark=$EFFECTIVE_BENCHMARK_ID smoke=$SMOKE_TYPE repeat=$REPEAT_COUNT warmup=$WARMUP_COUNT batch=$BATCH_SIZE stress=$STRESS_MODE unload_after_run=$UNLOAD_AFTER_RUN"
 if [[ "$WAIT" != "1" ]]; then
   echo "After it finishes, pull reports with: ADB=$ADB ./scripts/pull_reports.sh"
   exit 0

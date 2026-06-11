@@ -105,6 +105,19 @@ public final class MainActivity extends Activity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        startPolling();
+    }
+
+    @Override
+    protected void onPause() {
+        polling = false;
+        mainHandler.removeCallbacks(pollRunnable);
+        super.onPause();
+    }
+
+    @Override
     protected void onDestroy() {
         polling = false;
         mainHandler.removeCallbacks(pollRunnable);

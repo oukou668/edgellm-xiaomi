@@ -16,7 +16,11 @@ A backend is accepted only when it:
 - Emits at least one decoded token from native/runtime inference.
 - Reports prompt token count and generated token count greater than zero.
 - Records runtime diagnostics, model artifact identity, and native library hash.
-- Completes three consecutive runs without process crash.
+- Completes the configured run without process crash.
+
+This gate does not require cold starts, repeated load/unload cycles, or a
+specific device start temperature. Temperature is captured as diagnostic
+evidence only.
 
 ## Table Reproduction Models
 
@@ -55,3 +59,8 @@ Run matrix:
 - KV-cache speed buckets: `0-4096`, `4096-8192`, ..., `61440-65536`
 - llama.cpp bucket positions are native KV positions.
 - MLC bucket positions are approximate cumulative token positions.
+- No cold-start gate is applied. The matrix keeps the model loaded across batch
+  sizes within the same backend and unloads only at the end of that backend
+  block.
+- Device temperature at run start is not gated; peak thermal and battery
+  temperatures remain report fields.

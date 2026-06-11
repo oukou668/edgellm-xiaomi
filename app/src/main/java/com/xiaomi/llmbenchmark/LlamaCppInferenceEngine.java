@@ -15,9 +15,10 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
     // reports finish_reason="timeout" (it does NOT throw, so the decode-speed profile is preserved).
     private static final long PER_SAMPLE_TIMEOUT_MS = 120L * 60L * 1000L;
     private static boolean libraryLoaded;
+    private static final Object NATIVE_LOCK = new Object();
+    private static String loadedModelKey = "";
 
     private final Context context;
-    private final Object lock = new Object();
     private ModelConfig model;
     private RuntimeDiagnostics diagnostics = RuntimeDiagnostics.unknown();
     private boolean nativeReady;
@@ -51,6 +52,18 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         details.put("default_top_p", String.valueOf(model.defaultParams.topP));
         details.put("default_thinking_enabled", String.valueOf(model.defaultParams.thinkingEnabled));
         details.put("chat_template", "official_gguf_template");
+        String loadKey =
+                gguf.getAbsolutePath()
+                        + "|threads="
+                        + threads
+                        + "|temperature="
+                        + model.defaultParams.temperature
+                        + "|top_p="
+                        + model.defaultParams.topP
+                        + "|top_k="
+                        + model.defaultParams.topK
+                        + "|seed="
+                        + model.defaultParams.seed;
         diagnostics =
                 new RuntimeDiagnostics(
                         model.backendId,
@@ -60,23 +73,29 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                         NativeLibraryInfo.sha256(context, System.mapLibraryName(LIB_NAME)),
                         BuildConfig.LLAMA_CPP_GIT_COMMIT,
                         details);
-        synchronized (lock) {
-            nativeUnload();
-            int result =
-                    nativeLoad(
-                            gguf.getAbsolutePath(),
-                            threads,
-                            model.defaultParams.temperature,
-                            model.defaultParams.topP,
-                            model.defaultParams.topK,
-                            model.defaultParams.seed);
-            if (result != 0) {
-                details.put("native_load_result", String.valueOf(result));
-                details.put("native_last_error", nativeLastError());
-                throw new IllegalStateException(
-                        "llama.cpp native load failed: " + result + " " + nativeLastError());
+        synchronized (NATIVE_LOCK) {
+            boolean reused = loadKey.equals(loadedModelKey);
+            if (!reused) {
+                nativeUnload();
+                loadedModelKey = "";
+                int result =
+                        nativeLoad(
+                                gguf.getAbsolutePath(),
+                                threads,
+                                model.defaultParams.temperature,
+                                model.defaultParams.topP,
+                                model.defaultParams.topK,
+                                model.defaultParams.seed);
+                if (result != 0) {
+                    details.put("native_load_result", String.valueOf(result));
+                    details.put("native_last_error", nativeLastError());
+                    throw new IllegalStateException(
+                            "llama.cpp native load failed: " + result + " " + nativeLastError());
+                }
+                loadedModelKey = loadKey;
             }
             this.model = model;
+            details.put("model_reused", String.valueOf(reused));
             details.put("system_info", nativeSystemInfo());
             diagnostics =
                     new RuntimeDiagnostics(
@@ -98,7 +117,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         int contextWindow = params.contextWindowSize > 0 ? params.contextWindowSize : model.contextWindow;
         String kvCacheType = contextWindow > 32768 ? "q4_0" : "f16";
         String rawJson;
-        synchronized (lock) {
+        synchronized (NATIVE_LOCK) {
             rawJson =
                     nativeGenerate(
                             item.displayPrompt(),
@@ -145,7 +164,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             itemIds[i] = items.get(i).id;
         }
         String rawJson;
-        synchronized (lock) {
+        synchronized (NATIVE_LOCK) {
             rawJson =
                     nativeGenerateBatch(
                             prompts,
@@ -198,9 +217,10 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
 
     @Override
     public void unload() {
-        synchronized (lock) {
+        synchronized (NATIVE_LOCK) {
             if (nativeReady) {
                 nativeUnload();
+                loadedModelKey = "";
             }
             model = null;
         }

@@ -65,7 +65,8 @@ public final class BenchmarkService extends Service {
                             intent.getIntExtra("repeat_count", 1),
                             intent.getIntExtra("warmup_count", 0),
                             intent.getIntExtra("batch_size", 1),
-                            intent.getBooleanExtra("stress_mode", false));
+                            intent.getBooleanExtra("stress_mode", false),
+                            intent.getBooleanExtra("unload_after_run", false));
             Log.i(TAG, "Service benchmark starting: " + backendId + "/" + model.modelId + " " + benchmark.benchmarkId);
             BenchmarkRunReport report =
                     new BenchmarkRunner(this)

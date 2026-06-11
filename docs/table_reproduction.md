@@ -18,6 +18,11 @@ The original table `Average Score` is not reused. Reports recompute the mean
 over the 13 selected datasets and show deltas against the per-dataset table
 baselines.
 
+The reproduction flow does not require cold-start timing. Runs may reuse a
+loaded model/runtime in the same app process, and device start temperature is
+not a gate. Thermal and battery readings stay in the evidence package for
+diagnostics.
+
 ## Workflow
 
 Validate static config:

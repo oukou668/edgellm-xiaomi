@@ -67,6 +67,13 @@ BACKEND_ID=mlc SMOKE_TYPE=real_model_smoke ./scripts/run_backend_smoke_adb.sh
 BACKEND_ID=llama_cpp SMOKE_TYPE=real_model_smoke ./scripts/run_backend_smoke_adb.sh
 ```
 
+Device smoke and diagnostic runs do not require a cold start. The default runner
+keeps the loaded model/runtime in the app process after a run
+(`UNLOAD_AFTER_RUN=0`) so adjacent runs can reuse it. Use
+`UNLOAD_AFTER_RUN=1` only at an intentional backend/model boundary or when
+freeing memory. Battery and thermal readings are always recorded, but there is
+no device start-temperature gate.
+
 MiniCPM5 AIME2026 Avg@1 batch/KV diagnostic:
 
 ```bash
@@ -81,6 +88,8 @@ BUNDLE_DIR=<generated-bundle> ./scripts/run_aime26_avg1_batch_matrix_adb.sh
 ```
 
 The matrix runner executes `llama_cpp` and `mlc` with `BATCH_SIZE=1,2,4`.
-It writes per-run Android reports and, when reports are pulled locally,
+Within each backend block it keeps the model loaded between batch sizes and
+unloads only after the backend's final batch. It writes per-run Android reports
+and, when reports are pulled locally,
 `scripts/summarize_aime26_avg1_batch_matrix.py` emits the Avg@1, batch
 speedup, and KV-cache bucket summary.

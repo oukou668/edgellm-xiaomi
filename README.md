@@ -116,7 +116,15 @@ WAIT=0 ./scripts/run_benchmark_adb.sh          # start only
 PULL=0 ./scripts/run_benchmark_adb.sh          # wait but do not pull reports
 TIMEOUT_SECONDS=1800 ./scripts/run_benchmark_adb.sh
 STAY_AWAKE=0 ./scripts/run_benchmark_adb.sh
+UNLOAD_AFTER_RUN=1 ./scripts/run_benchmark_adb.sh  # explicitly release model after this run
 ```
+
+Runs do not require a cold start. By default the app keeps a successfully
+loaded model/runtime alive inside the process after a run so follow-up runs with
+the same backend/model can avoid extra unload/load cycles. Set
+`UNLOAD_AFTER_RUN=1` only when intentionally freeing memory, switching stress
+phases, or ending a backend block. Device temperature is recorded in reports but
+there is no start-temperature gate.
 
 ## Benchmark And Hardware Metrics
 
@@ -144,6 +152,9 @@ Reports include top-level and per-item hardware samples:
 - battery temperature
 - maximum readable thermal-zone temperature and zone name
 
+Temperature metrics are diagnostic only. They are not used as run-start gates
+or pass/fail criteria.
+
 ## MLC Integration
 
 The mandatory MLC smoke model targets
@@ -161,8 +172,9 @@ The mandatory llama.cpp smoke model is
 `Mungert/MiniCPM4-0.5B-GGUF/MiniCPM4-0.5B-q4_k_m.gguf`, pinned by revision,
 size, and sha256 in `models.json`. The app loads GGUF files from an app-private
 filesystem path, not directly from APK assets. The JNI bridge owns model,
-context, sampler, and batch resources, releases partial loads, and supports
-repeat load/unload smoke checks.
+context, sampler, and batch resources, releases partial loads, and can reuse an
+already loaded model in the same process when the model path and load parameters
+match.
 
 ## Table Reproduction
 

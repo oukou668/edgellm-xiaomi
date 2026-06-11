@@ -46,9 +46,14 @@ declare -a backend_specs=(
 for spec in "${backend_specs[@]}"; do
   backend="${spec%%:*}"
   model="${spec#*:}"
-  for batch_size in "${batch_values[@]}"; do
+  for batch_index in "${!batch_values[@]}"; do
+    batch_size="${batch_values[$batch_index]}"
     batch_size="$(echo "$batch_size" | tr -d '[:space:]')"
     [[ -n "$batch_size" ]] || continue
+    unload_after_run=0
+    if [[ "$batch_index" == "$((${#batch_values[@]} - 1))" ]]; then
+      unload_after_run=1
+    fi
     echo "== AIME26 Avg@1 backend=$backend model=$model batch_size=$batch_size =="
     RUNNER=service \
       BACKEND_ID="$backend" \
@@ -58,6 +63,7 @@ for spec in "${backend_specs[@]}"; do
       REPEAT_COUNT=1 \
       WARMUP_COUNT=0 \
       BATCH_SIZE="$batch_size" \
+      UNLOAD_AFTER_RUN="$unload_after_run" \
       WAIT="$WAIT" \
       PULL="$PULL" \
       TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \

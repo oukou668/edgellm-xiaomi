@@ -21,6 +21,15 @@ final class MlcInferenceEngine implements InferenceEngine {
     // Per-sample inference timeout: 120 minutes. On timeout we return the partial generation with
     // finish_reason="timeout" (so the decode-speed profile is preserved), then reset the engine.
     private static final long PER_SAMPLE_TIMEOUT_MS = 120L * 60L * 1000L;
+    private static final Object CACHE_LOCK = new Object();
+    private static final LinkedBlockingQueue<String> STREAM_EVENTS = new LinkedBlockingQueue<>();
+    private static Object cachedEngine;
+    private static Method cachedReload;
+    private static Method cachedChatCompletion;
+    private static Method cachedReset;
+    private static Method cachedUnload;
+    private static RuntimeDiagnostics cachedDiagnostics;
+    private static String cachedLoadKey = "";
 
     private final Context context;
     private Object engine;
@@ -30,7 +39,6 @@ final class MlcInferenceEngine implements InferenceEngine {
     private Method unload;
     private boolean servingMode;
     private RuntimeDiagnostics diagnostics = RuntimeDiagnostics.unknown();
-    private final LinkedBlockingQueue<String> streamEvents = new LinkedBlockingQueue<>();
 
     MlcInferenceEngine(Context context) {
         this.context = context.getApplicationContext();
@@ -54,6 +62,27 @@ final class MlcInferenceEngine implements InferenceEngine {
             throw new IllegalStateException("MLC model directory missing mlc-chat-config.json: "
                     + loadDir.getAbsolutePath());
         }
+        String mode = servingMode ? "server" : "interactive";
+        String loadKey = loadDir.getAbsolutePath() + "|model_lib=" + model.modelLib + "|mode=" + mode;
+        synchronized (CACHE_LOCK) {
+            if (cachedEngine != null && loadKey.equals(cachedLoadKey)) {
+                engine = cachedEngine;
+                reload = cachedReload;
+                chatCompletion = cachedChatCompletion;
+                reset = cachedReset;
+                unload = cachedUnload;
+                diagnostics = cachedDiagnostics == null ? RuntimeDiagnostics.unknown() : cachedDiagnostics;
+                Log.i(TAG, "Reusing cached MLC engine: " + loadKey);
+                return;
+            }
+            if (cachedEngine != null && cachedUnload != null) {
+                try {
+                    cachedUnload.invoke(cachedEngine);
+                } catch (Exception ignored) {
+                }
+                clearCacheLocked();
+            }
+        }
         loadKnownNativeLibraries();
         Class<?> engineClass = Class.forName("ai.mlc.mlcllm.JSONFFIEngine");
         Class<?> callbackClass = Class.forName("ai.mlc.mlcllm.JSONFFIEngine$KotlinFunction");
@@ -73,7 +102,7 @@ final class MlcInferenceEngine implements InferenceEngine {
                         new Class<?>[] {callbackClass},
                         (proxy, method, args) -> {
                             if (args != null && args.length > 0 && args[0] != null) {
-                                streamEvents.offer(String.valueOf(args[0]));
+                                STREAM_EVENTS.offer(String.valueOf(args[0]));
                             }
                             return null;
                         });
@@ -82,7 +111,6 @@ final class MlcInferenceEngine implements InferenceEngine {
         startDaemon("mlc-background-loop", () -> invokeNoArg(runBackgroundLoop));
         startDaemon("mlc-stream-loop", () -> invokeNoArg(runBackgroundStreamBackLoop));
 
-        String mode = servingMode ? "server" : "interactive";
         JSONObject config = new JSONObject();
         config.put("model", loadDir.getAbsolutePath());
         if (model.modelLib != null && !model.modelLib.isEmpty()) {
@@ -100,6 +128,7 @@ final class MlcInferenceEngine implements InferenceEngine {
         details.put("hf_repo", model.hfRepo);
         details.put("hf_revision", model.hfRevision);
         details.put("mode", mode);
+        details.put("model_reused", "false");
         String runtimeLibrary = System.mapLibraryName("tvm4j_runtime_packed");
         details.put("runtime_library", runtimeLibrary);
         diagnostics =
@@ -111,6 +140,15 @@ final class MlcInferenceEngine implements InferenceEngine {
                         NativeLibraryInfo.sha256(context, runtimeLibrary),
                         BuildConfig.MLC_LLM_GIT_COMMIT,
                         details);
+        synchronized (CACHE_LOCK) {
+            cachedEngine = engine;
+            cachedReload = reload;
+            cachedChatCompletion = chatCompletion;
+            cachedReset = reset;
+            cachedUnload = unload;
+            cachedDiagnostics = diagnostics;
+            cachedLoadKey = loadKey;
+        }
     }
 
     @Override
@@ -119,7 +157,7 @@ final class MlcInferenceEngine implements InferenceEngine {
             throw new IllegalStateException("MLC engine is not loaded.");
         }
 
-        streamEvents.clear();
+        STREAM_EVENTS.clear();
         reset.invoke(engine);
         String requestId = UUID.randomUUID().toString();
         JSONObject request = buildRequest(item, params, requestId);
@@ -136,7 +174,7 @@ final class MlcInferenceEngine implements InferenceEngine {
         long deadlineNs = startNs + TimeUnit.MILLISECONDS.toNanos(PER_SAMPLE_TIMEOUT_MS);
         boolean finished = false;
         while (System.nanoTime() < deadlineNs) {
-            String event = streamEvents.poll(250, TimeUnit.MILLISECONDS);
+            String event = STREAM_EVENTS.poll(250, TimeUnit.MILLISECONDS);
             if (event == null) {
                 continue;
             }
@@ -197,7 +235,7 @@ final class MlcInferenceEngine implements InferenceEngine {
             throw new IllegalStateException("MLC engine is not loaded.");
         }
         int n = items.size();
-        streamEvents.clear();
+        STREAM_EVENTS.clear();
         reset.invoke(engine);
 
         String[] ids = new String[n];
@@ -228,7 +266,7 @@ final class MlcInferenceEngine implements InferenceEngine {
         long deadlineNs = startNs + TimeUnit.MILLISECONDS.toNanos(PER_SAMPLE_TIMEOUT_MS);
         int remaining = n;
         while (remaining > 0 && System.nanoTime() < deadlineNs) {
-            String event = streamEvents.poll(250, TimeUnit.MILLISECONDS);
+            String event = STREAM_EVENTS.poll(250, TimeUnit.MILLISECONDS);
             if (event == null) {
                 continue;
             }
@@ -312,12 +350,28 @@ final class MlcInferenceEngine implements InferenceEngine {
 
     @Override
     public void unload() {
-        if (engine != null && unload != null) {
-            try {
-                unload.invoke(engine);
-            } catch (Exception ignored) {
+        synchronized (CACHE_LOCK) {
+            if (engine != null && unload != null) {
+                try {
+                    unload.invoke(engine);
+                } catch (Exception ignored) {
+                }
+            }
+            if (engine == cachedEngine) {
+                clearCacheLocked();
             }
         }
+    }
+
+    private static void clearCacheLocked() {
+        cachedEngine = null;
+        cachedReload = null;
+        cachedChatCompletion = null;
+        cachedReset = null;
+        cachedUnload = null;
+        cachedDiagnostics = null;
+        cachedLoadKey = "";
+        STREAM_EVENTS.clear();
     }
 
     // Send the benchmark item's messages verbatim. Thinking on/off is governed by the model's
