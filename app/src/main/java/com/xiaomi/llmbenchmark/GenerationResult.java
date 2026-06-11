@@ -12,6 +12,7 @@ final class GenerationResult {
     final int promptTokens;
     final int estimatedOutputTokens;
     final String finishReason;
+    final String error;
     final RuntimeDiagnostics diagnostics;
     final List<DecodeSpeedBucket> decodeSpeedBuckets;
 
@@ -45,6 +46,32 @@ final class GenerationResult {
             String finishReason,
             RuntimeDiagnostics diagnostics,
             List<DecodeSpeedBucket> decodeSpeedBuckets) {
+        this(
+                text,
+                firstTokenLatencyMs,
+                promptEvalLatencyMs,
+                decodeLatencyMs,
+                totalLatencyMs,
+                promptTokens,
+                estimatedOutputTokens,
+                finishReason,
+                "",
+                diagnostics,
+                decodeSpeedBuckets);
+    }
+
+    GenerationResult(
+            String text,
+            long firstTokenLatencyMs,
+            long promptEvalLatencyMs,
+            long decodeLatencyMs,
+            long totalLatencyMs,
+            int promptTokens,
+            int estimatedOutputTokens,
+            String finishReason,
+            String error,
+            RuntimeDiagnostics diagnostics,
+            List<DecodeSpeedBucket> decodeSpeedBuckets) {
         this.text = text;
         this.firstTokenLatencyMs = firstTokenLatencyMs;
         this.promptEvalLatencyMs = promptEvalLatencyMs;
@@ -53,6 +80,7 @@ final class GenerationResult {
         this.promptTokens = promptTokens;
         this.estimatedOutputTokens = estimatedOutputTokens;
         this.finishReason = finishReason == null ? "unknown" : finishReason;
+        this.error = error == null ? "" : error;
         this.diagnostics = diagnostics == null ? RuntimeDiagnostics.unknown() : diagnostics;
         this.decodeSpeedBuckets =
                 decodeSpeedBuckets == null

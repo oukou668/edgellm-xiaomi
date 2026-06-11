@@ -3,9 +3,15 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cerrno>
+#include <cstdio>
+#include <deque>
 #include <cstring>
+#include <limits>
 #include <memory>
+#include <mutex>
+#include <random>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -13,6 +19,7 @@
 
 #include "common.h"
 #include "chat.h"
+#include "ggml-backend.h"
 #include "llama.h"
 #include "sampling.h"
 
@@ -23,6 +30,8 @@
 // Decode-speed profile bucket width, in KV-cache positions. We report average decode tok/s for
 // each [k*WIDTH, (k+1)*WIDTH) window so callers can see speed degrade toward 64K.
 static const int DECODE_BUCKET_WIDTH = 4096;
+static const size_t BACKEND_LOG_TAIL_LIMIT = 200;
+static const char *SAMPLING_POLICY_VERSION = "llama_jni_safe_top_p_v1";
 
 static llama_model *g_model = nullptr;
 static llama_context *g_context = nullptr;
@@ -33,15 +42,30 @@ static int g_context_window = 0;  // total n_ctx of the live context (per-seq co
 static int g_n_seq_max = 0;
 static std::string g_kv_cache_type = "f16";
 static int g_threads = 2;
-// Number of transformer layers to offload to the GPU backend. 999 = offload all (llama.cpp clamps
-// to the model's actual layer count). Requires a GPU ggml backend in the build (-DGGML_VULKAN=ON or
-// -DGGML_OPENCL=ON); if none is present llama.cpp transparently falls back to CPU.
-static int g_n_gpu_layers = 999;
+static std::string g_accelerator_requested = "auto";
+static std::string g_accelerator_active = "unknown";
+static int g_n_gpu_layers = -1;
+static int g_gpu_layers_offloaded = 0;
+static int g_gpu_layers_offloaded_actual = -1;
+static int g_model_layers = 0;
+static bool g_gpu_offload_active = false;
+static bool g_force_cpu = false;
+static bool g_context_offload_kqv = true;
+static bool g_context_op_offload = true;
+static float g_raw_temperature = 0.0f;
+static float g_raw_top_p = 1.0f;
+static int g_raw_top_k = 0;
 static float g_temperature = 0.0f;
 static float g_top_p = 1.0f;
 static int g_top_k = 0;
+static float g_min_p = 0.0f;
+static int g_min_keep = 1;
 static uint32_t g_seed = 0;
 static std::string g_last_error;
+static std::string g_last_logits_diagnostics = "{}";
+static std::string g_last_sampling_error;
+static std::deque<std::string> g_backend_log_tail;
+static std::mutex g_backend_log_mutex;
 // Cached handle to LiveStatus.appendToken(String,String) for live UI streaming (optional).
 static jclass g_live_cls = nullptr;
 static jmethodID g_live_append = nullptr;
@@ -71,11 +95,199 @@ static std::string json_escape(const std::string &value) {
     return out.str();
 }
 
+static std::string dev_type_name(enum ggml_backend_dev_type type) {
+    switch (type) {
+        case GGML_BACKEND_DEVICE_TYPE_CPU:
+            return "cpu";
+        case GGML_BACKEND_DEVICE_TYPE_GPU:
+            return "gpu";
+        case GGML_BACKEND_DEVICE_TYPE_IGPU:
+            return "igpu";
+        case GGML_BACKEND_DEVICE_TYPE_ACCEL:
+            return "accel";
+        case GGML_BACKEND_DEVICE_TYPE_META:
+            return "meta";
+        default:
+            return "unknown";
+    }
+}
+
+static bool has_gpu_device() {
+    return ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_GPU) != nullptr
+            || ggml_backend_dev_by_type(GGML_BACKEND_DEVICE_TYPE_IGPU) != nullptr;
+}
+
+static int gpu_device_count() {
+    int count = 0;
+    const size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        enum ggml_backend_dev_type type = ggml_backend_dev_type(dev);
+        if (type == GGML_BACKEND_DEVICE_TYPE_GPU || type == GGML_BACKEND_DEVICE_TYPE_IGPU) {
+            count++;
+        }
+    }
+    return count;
+}
+
+static void parse_gpu_offload_log(const std::string &line) {
+    const size_t marker = line.find("offloaded ");
+    if (marker == std::string::npos || line.find(" layers to GPU", marker) == std::string::npos) {
+        return;
+    }
+    int actual = -1;
+    int total = -1;
+    if (std::sscanf(line.c_str() + marker, "offloaded %d/%d layers to GPU", &actual, &total) == 2) {
+        g_gpu_layers_offloaded_actual = actual;
+        g_gpu_layers_offloaded = actual;
+        g_gpu_offload_active = actual > 0;
+        g_model_layers = std::max(g_model_layers, total - 1);
+        if (actual > 0) {
+            g_accelerator_active = "vulkan";
+        }
+    }
+}
+
+static void append_backend_log(const char *text) {
+    if (text == nullptr || text[0] == '\0') {
+        return;
+    }
+    std::string line(text);
+    while (!line.empty() && (line.back() == '\n' || line.back() == '\r')) {
+        line.pop_back();
+    }
+    parse_gpu_offload_log(line);
+    std::lock_guard<std::mutex> lock(g_backend_log_mutex);
+    g_backend_log_tail.push_back(line);
+    while (g_backend_log_tail.size() > BACKEND_LOG_TAIL_LIMIT) {
+        g_backend_log_tail.pop_front();
+    }
+}
+
+static void clear_backend_log_tail() {
+    std::lock_guard<std::mutex> lock(g_backend_log_mutex);
+    g_backend_log_tail.clear();
+}
+
+static std::string backend_log_tail_json() {
+    std::lock_guard<std::mutex> lock(g_backend_log_mutex);
+    std::ostringstream out;
+    out << "[";
+    bool first = true;
+    for (const std::string &line : g_backend_log_tail) {
+        if (!first) {
+            out << ",";
+        }
+        first = false;
+        out << "\"" << json_escape(line) << "\"";
+    }
+    out << "]";
+    return out.str();
+}
+
+static std::string backend_devices_json() {
+    std::ostringstream out;
+    out << "[";
+    bool first = true;
+    const size_t n = ggml_backend_dev_count();
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_dev_t dev = ggml_backend_dev_get(i);
+        if (!first) {
+            out << ",";
+        }
+        first = false;
+        ggml_backend_dev_props props {};
+        ggml_backend_dev_get_props(dev, &props);
+        size_t free_mem = 0;
+        size_t total_mem = 0;
+        ggml_backend_dev_memory(dev, &free_mem, &total_mem);
+        ggml_backend_reg_t reg = ggml_backend_dev_backend_reg(dev);
+        const char *name = ggml_backend_dev_name(dev);
+        const char *description = ggml_backend_dev_description(dev);
+        const char *reg_name = reg ? ggml_backend_reg_name(reg) : "";
+        out << "{"
+            << "\"index\":" << i << ","
+            << "\"name\":\"" << json_escape(name == nullptr ? "" : name) << "\","
+            << "\"description\":\"" << json_escape(description == nullptr ? "" : description) << "\","
+            << "\"type\":\"" << dev_type_name(ggml_backend_dev_type(dev)) << "\","
+            << "\"backend_reg\":\"" << json_escape(reg_name == nullptr ? "" : reg_name) << "\","
+            << "\"memory_free\":" << static_cast<unsigned long long>(free_mem) << ","
+            << "\"memory_total\":" << static_cast<unsigned long long>(total_mem) << ","
+            << "\"props_memory_free\":" << static_cast<unsigned long long>(props.memory_free) << ","
+            << "\"props_memory_total\":" << static_cast<unsigned long long>(props.memory_total)
+            << "}";
+    }
+    out << "]";
+    return out.str();
+}
+
+static std::string backend_regs_json() {
+    std::ostringstream out;
+    out << "[";
+    bool first = true;
+    const size_t n = ggml_backend_reg_count();
+    for (size_t i = 0; i < n; i++) {
+        ggml_backend_reg_t reg = ggml_backend_reg_get(i);
+        if (!first) {
+            out << ",";
+        }
+        first = false;
+        const char *name = reg ? ggml_backend_reg_name(reg) : "";
+        out << "{"
+            << "\"index\":" << i << ","
+            << "\"name\":\"" << json_escape(name == nullptr ? "" : name) << "\","
+            << "\"device_count\":" << (reg ? ggml_backend_reg_dev_count(reg) : 0)
+            << "}";
+    }
+    out << "]";
+    return out.str();
+}
+
+static std::string gpu_diagnostics_json() {
+    std::ostringstream out;
+    const bool supports_gpu = llama_supports_gpu_offload();
+    const int gpu_devices = gpu_device_count();
+    out << "{";
+    out << "\"accelerator_requested\":\"" << json_escape(g_accelerator_requested) << "\",";
+    out << "\"accelerator_active\":\"" << json_escape(g_accelerator_active) << "\",";
+    out << "\"gpu_layers_requested\":" << g_n_gpu_layers << ",";
+    out << "\"gpu_layers_offloaded\":" << g_gpu_layers_offloaded << ",";
+    out << "\"gpu_layers_offloaded_actual\":" << g_gpu_layers_offloaded_actual << ",";
+    out << "\"gpu_offload_active\":" << (g_gpu_offload_active ? "true" : "false") << ",";
+    out << "\"gpu_offload_proof\":\""
+        << (g_gpu_layers_offloaded_actual > 0 ? "llama_cpp_offload_log" : "missing")
+        << "\",";
+    out << "\"llama_supports_gpu_offload\":" << (supports_gpu ? "true" : "false") << ",";
+    out << "\"gpu_device_count\":" << gpu_devices << ",";
+    out << "\"model_layers\":" << g_model_layers << ",";
+    out << "\"context_offload_kqv\":" << (g_context_offload_kqv ? "true" : "false") << ",";
+    out << "\"context_op_offload\":" << (g_context_op_offload ? "true" : "false") << ",";
+    out << "\"sampling_policy_version\":\"" << SAMPLING_POLICY_VERSION << "\",";
+    out << "\"sampling_raw_temperature\":" << g_raw_temperature << ",";
+    out << "\"sampling_raw_top_p\":" << g_raw_top_p << ",";
+    out << "\"sampling_raw_top_k\":" << g_raw_top_k << ",";
+    out << "\"sampling_temperature\":" << g_temperature << ",";
+    out << "\"sampling_top_p\":" << g_top_p << ",";
+    out << "\"sampling_top_k\":" << g_top_k << ",";
+    out << "\"sampling_min_p\":" << g_min_p << ",";
+    out << "\"sampling_min_keep\":" << g_min_keep << ",";
+    out << "\"last_sampling_error\":\"" << json_escape(g_last_sampling_error) << "\",";
+    out << "\"last_logits_diagnostics\":" << (g_last_logits_diagnostics.empty() ? "{}" : g_last_logits_diagnostics) << ",";
+    out << "\"backend_registry_count\":" << ggml_backend_reg_count() << ",";
+    out << "\"backend_device_count\":" << ggml_backend_dev_count() << ",";
+    out << "\"backend_regs\":" << backend_regs_json() << ",";
+    out << "\"backend_devices\":" << backend_devices_json() << ",";
+    out << "\"backend_log_tail\":" << backend_log_tail_json();
+    out << "}";
+    return out.str();
+}
+
 static void log_callback(enum ggml_log_level level, const char *text, void *) {
     int priority = ANDROID_LOG_INFO;
     if (level == GGML_LOG_LEVEL_ERROR) priority = ANDROID_LOG_ERROR;
     if (level == GGML_LOG_LEVEL_WARN) priority = ANDROID_LOG_WARN;
     if (level == GGML_LOG_LEVEL_DEBUG) priority = ANDROID_LOG_DEBUG;
+    append_backend_log(text);
     __android_log_write(priority, LOG_TAG, text);
 }
 
@@ -127,13 +339,315 @@ static void release_resources() {
     }
 }
 
-static common_sampler *make_sampler_seeded(uint32_t seed) {
-    common_params_sampling params;
-    params.temp = g_temperature;
-    params.top_p = g_top_p;
-    params.top_k = g_top_k;
-    params.seed = seed;
-    return common_sampler_init(g_model, params);
+static void normalize_sampling_params(float temperature, float top_p, int top_k, uint32_t seed) {
+    g_raw_temperature = temperature;
+    g_raw_top_p = top_p;
+    g_raw_top_k = top_k;
+    g_temperature = std::isfinite(temperature) ? std::max(0.0f, temperature) : 0.0f;
+    g_top_p = std::isfinite(top_p) && top_p > 0.0f ? std::min(top_p, 1.0f) : 1.0f;
+    // top_k <= 0 keeps the llama.cpp CLI "disabled / use full vocab" meaning.
+    g_top_k = top_k > 0 ? top_k : 0;
+    g_min_p = 0.0f;
+    g_min_keep = 1;
+    g_seed = seed;
+}
+
+struct SampleCandidate {
+    llama_token id = LLAMA_TOKEN_NULL;
+    float logit = 0.0f;
+    double weight = 0.0;
+};
+
+struct SampleOutcome {
+    bool ok = false;
+    llama_token token = LLAMA_TOKEN_NULL;
+    std::string error;
+    std::string diagnostics_json;
+};
+
+static std::string logits_diagnostics_json(
+        const std::string &stage,
+        const std::string &item_id,
+        int seq_index,
+        int token_position,
+        int logits_index,
+        int total,
+        int finite_count,
+        int nan_count,
+        int pos_inf_count,
+        int neg_inf_count,
+        float min_logit,
+        float max_logit,
+        llama_token max_token,
+        const std::string &error) {
+    std::ostringstream out;
+    out << "{";
+    out << "\"stage\":\"" << json_escape(stage) << "\",";
+    out << "\"item_id\":\"" << json_escape(item_id) << "\",";
+    out << "\"seq_index\":" << seq_index << ",";
+    out << "\"token_position\":" << token_position << ",";
+    out << "\"logits_index\":" << logits_index << ",";
+    out << "\"total_logits\":" << total << ",";
+    out << "\"finite_logits\":" << finite_count << ",";
+    out << "\"nan_logits\":" << nan_count << ",";
+    out << "\"pos_inf_logits\":" << pos_inf_count << ",";
+    out << "\"neg_inf_logits\":" << neg_inf_count << ",";
+    if (finite_count > 0) {
+        out << "\"min_logit\":" << min_logit << ",";
+        out << "\"max_logit\":" << max_logit << ",";
+        out << "\"max_token\":" << max_token << ",";
+    } else {
+        out << "\"min_logit\":null,\"max_logit\":null,\"max_token\":null,";
+    }
+    out << "\"accelerator_requested\":\"" << json_escape(g_accelerator_requested) << "\",";
+    out << "\"accelerator_active\":\"" << json_escape(g_accelerator_active) << "\",";
+    out << "\"gpu_layers_requested\":" << g_n_gpu_layers << ",";
+    out << "\"gpu_layers_offloaded_actual\":" << g_gpu_layers_offloaded_actual << ",";
+    out << "\"sampling_policy_version\":\"" << SAMPLING_POLICY_VERSION << "\",";
+    out << "\"sampling_temperature\":" << g_temperature << ",";
+    out << "\"sampling_top_p\":" << g_top_p << ",";
+    out << "\"sampling_top_k\":" << g_top_k << ",";
+    out << "\"sampling_min_p\":" << g_min_p << ",";
+    out << "\"sampling_min_keep\":" << g_min_keep << ",";
+    out << "\"error\":\"" << json_escape(error) << "\"";
+    out << "}";
+    return out.str();
+}
+
+static SampleOutcome fail_sample(
+        const std::string &stage,
+        const std::string &item_id,
+        int seq_index,
+        int token_position,
+        int logits_index,
+        int total,
+        int finite_count,
+        int nan_count,
+        int pos_inf_count,
+        int neg_inf_count,
+        float min_logit,
+        float max_logit,
+        llama_token max_token,
+        const std::string &reason) {
+    SampleOutcome outcome;
+    outcome.ok = false;
+    outcome.error = "invalid_logits:" + reason;
+    outcome.diagnostics_json = logits_diagnostics_json(
+            stage,
+            item_id,
+            seq_index,
+            token_position,
+            logits_index,
+            total,
+            finite_count,
+            nan_count,
+            pos_inf_count,
+            neg_inf_count,
+            min_logit,
+            max_logit,
+            max_token,
+            outcome.error);
+    g_last_sampling_error = outcome.error;
+    g_last_logits_diagnostics = outcome.diagnostics_json;
+    set_last_error(outcome.error + " " + outcome.diagnostics_json);
+    return outcome;
+}
+
+static SampleOutcome sample_token_checked(
+        llama_context *ctx,
+        int logits_index,
+        std::mt19937 &rng,
+        const std::string &stage,
+        const std::string &item_id,
+        int seq_index,
+        int token_position) {
+    const llama_vocab *vocab = llama_model_get_vocab(g_model);
+    const int n_vocab = vocab == nullptr ? 0 : llama_vocab_n_tokens(vocab);
+    const float *logits = ctx == nullptr ? nullptr : llama_get_logits_ith(ctx, logits_index);
+    if (logits == nullptr || n_vocab <= 0) {
+        return fail_sample(
+                stage,
+                item_id,
+                seq_index,
+                token_position,
+                logits_index,
+                n_vocab,
+                0,
+                0,
+                0,
+                0,
+                0.0f,
+                0.0f,
+                LLAMA_TOKEN_NULL,
+                logits == nullptr ? "missing_logits" : "empty_vocab");
+    }
+
+    std::vector<SampleCandidate> candidates;
+    candidates.reserve(static_cast<size_t>(n_vocab));
+    int finite_count = 0;
+    int nan_count = 0;
+    int pos_inf_count = 0;
+    int neg_inf_count = 0;
+    float min_logit = std::numeric_limits<float>::infinity();
+    float max_logit = -std::numeric_limits<float>::infinity();
+    llama_token max_token = LLAMA_TOKEN_NULL;
+
+    for (llama_token token = 0; token < n_vocab; token++) {
+        const float logit = logits[token];
+        if (std::isfinite(logit)) {
+            finite_count++;
+            if (logit < min_logit) {
+                min_logit = logit;
+            }
+            if (logit > max_logit) {
+                max_logit = logit;
+                max_token = token;
+            }
+            candidates.push_back(SampleCandidate {token, logit, 0.0});
+        } else if (std::isnan(logit)) {
+            nan_count++;
+        } else if (logit > 0.0f) {
+            pos_inf_count++;
+        } else {
+            neg_inf_count++;
+        }
+    }
+
+    if (finite_count <= 0 || candidates.empty()) {
+        return fail_sample(
+                stage,
+                item_id,
+                seq_index,
+                token_position,
+                logits_index,
+                n_vocab,
+                finite_count,
+                nan_count,
+                pos_inf_count,
+                neg_inf_count,
+                min_logit,
+                max_logit,
+                max_token,
+                "no_finite_logits");
+    }
+
+    SampleOutcome outcome;
+    outcome.ok = true;
+    outcome.diagnostics_json = logits_diagnostics_json(
+            stage,
+            item_id,
+            seq_index,
+            token_position,
+            logits_index,
+            n_vocab,
+            finite_count,
+            nan_count,
+            pos_inf_count,
+            neg_inf_count,
+            min_logit,
+            max_logit,
+            max_token,
+            "");
+    g_last_logits_diagnostics = outcome.diagnostics_json;
+    g_last_sampling_error.clear();
+
+    if (g_temperature <= 0.0f) {
+        outcome.token = max_token;
+        return outcome;
+    }
+
+    if (g_top_k > 0 && static_cast<int>(candidates.size()) > g_top_k) {
+        std::nth_element(
+                candidates.begin(),
+                candidates.begin() + g_top_k,
+                candidates.end(),
+                [](const SampleCandidate &a, const SampleCandidate &b) {
+                    return a.logit > b.logit;
+                });
+        candidates.resize(static_cast<size_t>(g_top_k));
+    }
+    std::sort(
+            candidates.begin(),
+            candidates.end(),
+            [](const SampleCandidate &a, const SampleCandidate &b) {
+                return a.logit > b.logit;
+            });
+
+    const double inv_temp = 1.0 / static_cast<double>(g_temperature);
+    const double max_scaled = static_cast<double>(candidates.front().logit) * inv_temp;
+    double total_weight = 0.0;
+    for (SampleCandidate &candidate : candidates) {
+        candidate.weight = std::exp(static_cast<double>(candidate.logit) * inv_temp - max_scaled);
+        if (!std::isfinite(candidate.weight) || candidate.weight < 0.0) {
+            candidate.weight = 0.0;
+        }
+        total_weight += candidate.weight;
+    }
+    if (!std::isfinite(total_weight) || total_weight <= 0.0) {
+        return fail_sample(
+                stage,
+                item_id,
+                seq_index,
+                token_position,
+                logits_index,
+                n_vocab,
+                finite_count,
+                nan_count,
+                pos_inf_count,
+                neg_inf_count,
+                min_logit,
+                max_logit,
+                max_token,
+                "zero_probability_mass");
+    }
+
+    size_t keep_count = candidates.size();
+    double kept_weight = total_weight;
+    if (g_top_p > 0.0f && g_top_p < 1.0f) {
+        double cumulative = 0.0;
+        keep_count = 0;
+        for (size_t i = 0; i < candidates.size(); i++) {
+            cumulative += candidates[i].weight;
+            keep_count = i + 1;
+            if (keep_count >= static_cast<size_t>(g_min_keep)
+                    && cumulative / total_weight >= static_cast<double>(g_top_p)) {
+                break;
+            }
+        }
+        kept_weight = cumulative;
+    }
+    keep_count = std::max(keep_count, static_cast<size_t>(g_min_keep));
+    keep_count = std::min(keep_count, candidates.size());
+    if (keep_count == 0 || kept_weight <= 0.0 || !std::isfinite(kept_weight)) {
+        return fail_sample(
+                stage,
+                item_id,
+                seq_index,
+                token_position,
+                logits_index,
+                n_vocab,
+                finite_count,
+                nan_count,
+                pos_inf_count,
+                neg_inf_count,
+                min_logit,
+                max_logit,
+                max_token,
+                "empty_top_p_candidates");
+    }
+
+    std::uniform_real_distribution<double> dist(0.0, kept_weight);
+    const double target = dist(rng);
+    double running = 0.0;
+    for (size_t i = 0; i < keep_count; i++) {
+        running += candidates[i].weight;
+        if (running >= target) {
+            outcome.token = candidates[i].id;
+            return outcome;
+        }
+    }
+    outcome.token = candidates[keep_count - 1].id;
+    return outcome;
 }
 
 static ggml_type kv_type_from_name(const std::string &name) {
@@ -190,6 +704,12 @@ static int ensure_context(int per_seq_context, const std::string &kv_cache_type,
     context_params.n_threads_batch = g_threads;
     context_params.type_k = kv_type_from_name(requested_kv);
     context_params.type_v = kv_type_from_name(requested_kv);
+    if (g_force_cpu) {
+        context_params.offload_kqv = false;
+        context_params.op_offload = false;
+    }
+    g_context_offload_kqv = context_params.offload_kqv;
+    g_context_op_offload = context_params.op_offload;
     LOGI("init llama context total_ctx=%d per_seq=%d n_seq=%d kv=%s threads=%d",
          total_ctx, per_seq, n_seq, requested_kv.c_str(), g_threads);
     g_context = llama_init_from_model(g_model, context_params);
@@ -257,6 +777,7 @@ static std::string buckets_json(const std::vector<int> &tokens, const std::vecto
 
 struct SeqResult {
     std::string text;
+    std::string error;
     int prompt_tokens = 0;
     int generated_tokens = 0;
     int64_t first_token_ms = -1;
@@ -300,10 +821,7 @@ static BatchResult run_batch(
         return result;
     }
 
-    g_temperature = temperature;
-    g_top_p = top_p;
-    g_top_k = top_k;
-    g_seed = seed;
+    normalize_sampling_params(temperature, top_p, top_k, seed);
 
     const int context_result = ensure_context(per_seq_context, kv_cache_type, n_seq);
     if (context_result != 0) {
@@ -318,7 +836,11 @@ static BatchResult run_batch(
     const int64_t start = now_ms();
     llama_memory_clear(llama_get_memory(g_context), true);
 
-    std::vector<common_sampler *> samplers(n_seq, nullptr);
+    std::vector<std::mt19937> rngs;
+    rngs.reserve(static_cast<size_t>(n_seq));
+    for (int i = 0; i < n_seq; i++) {
+        rngs.emplace_back(seed + static_cast<uint32_t>(i));
+    }
     std::vector<std::string> texts(n_seq);
     std::vector<int> generated(n_seq, 0);
     std::vector<int> prompt_len(n_seq, 0);
@@ -326,6 +848,7 @@ static BatchResult run_batch(
     std::vector<bool> active(n_seq, true);
     std::vector<int64_t> first_token_ms(n_seq, -1);
     std::vector<std::string> finish(n_seq, "length");
+    std::vector<std::string> errors(n_seq);
     std::vector<llama_token> pending(n_seq, 0);
     std::vector<int> out_idx(n_seq, -1);
     std::vector<std::vector<int>> bucket_tokens(n_seq);
@@ -335,34 +858,39 @@ static BatchResult run_batch(
     // its own prefill is required because the next sequence's decode invalidates prior logits.
     const int64_t prefill_start = now_ms();
     for (int i = 0; i < n_seq; i++) {
-        samplers[i] = make_sampler_seeded(seed + static_cast<uint32_t>(i));
-        if (samplers[i] == nullptr) {
-            active[i] = false;
-            finish[i] = "sampler_init_failed";
-            continue;
-        }
         const std::string formatted = apply_chat_template(prompts[i], thinking);
         llama_tokens tokens = common_tokenize(g_context, formatted, true, true);
         prompt_len[i] = static_cast<int>(tokens.size());
         if (tokens.empty()) {
             active[i] = false;
             finish[i] = "empty_prompt_tokens";
+            errors[i] = "empty_prompt_tokens";
             continue;
         }
         if (prompt_len[i] + requested_max >= per_seq) {
             active[i] = false;
             finish[i] = "context_overflow";
+            errors[i] = "context_overflow";
             continue;
         }
         const int last_idx = prefill_seq(tokens, i);
         if (last_idx < 0) {
             active[i] = false;
             finish[i] = "prompt_decode_failed";
+            errors[i] = "prompt_decode_failed";
             continue;
         }
-        llama_token first = common_sampler_sample(samplers[i], g_context, last_idx);
-        common_sampler_accept(samplers[i], first, true);
-        pending[i] = first;
+        const std::string item_id =
+                i < static_cast<int>(item_ids.size()) ? item_ids[i] : std::string();
+        SampleOutcome first = sample_token_checked(
+                g_context, last_idx, rngs[i], "prefill", item_id, i, prompt_len[i]);
+        if (!first.ok) {
+            active[i] = false;
+            finish[i] = "invalid_logits";
+            errors[i] = first.error;
+            continue;
+        }
+        pending[i] = first.token;
         positions[i] = prompt_len[i];
     }
     result.prefill_ms = now_ms() - prefill_start;
@@ -404,6 +932,11 @@ static BatchResult run_batch(
                     || texts[i].find("</s>") != std::string::npos) {
                 active[i] = false;
                 finish[i] = "stop";
+                continue;
+            }
+            if (generated[i] >= requested_max) {
+                active[i] = false;
+                finish[i] = "length";
             }
         }
         // 2) Pack one token per still-active sequence into a single batch.
@@ -428,6 +961,7 @@ static BatchResult run_batch(
                 if (active[i]) {
                     active[i] = false;
                     finish[i] = "error";
+                    errors[i] = "decode_failed";
                 }
             }
             break;
@@ -442,9 +976,17 @@ static BatchResult run_batch(
             ensure_bucket(bucket_tokens[i], bucket_ms[i], bucket);
             bucket_tokens[i][bucket] += 1;
             bucket_ms[i][bucket] += step_ms;
-            llama_token next = common_sampler_sample(samplers[i], g_context, out_idx[i]);
-            common_sampler_accept(samplers[i], next, true);
-            pending[i] = next;
+            const std::string item_id =
+                    i < static_cast<int>(item_ids.size()) ? item_ids[i] : std::string();
+            SampleOutcome next = sample_token_checked(
+                    g_context, out_idx[i], rngs[i], "decode", item_id, i, positions[i]);
+            if (!next.ok) {
+                active[i] = false;
+                finish[i] = "invalid_logits";
+                errors[i] = next.error;
+                continue;
+            }
+            pending[i] = next.token;
             positions[i] += 1;
         }
     }
@@ -457,13 +999,11 @@ static BatchResult run_batch(
         seq.generated_tokens = generated[i];
         seq.first_token_ms = first_token_ms[i];
         seq.finish_reason = finish[i];
+        seq.error = errors[i];
         seq.bucket_tokens = bucket_tokens[i];
         seq.bucket_ms = bucket_ms[i];
         result.seqs.push_back(seq);
         result.total_generated += generated[i];
-        if (samplers[i] != nullptr) {
-            common_sampler_free(samplers[i]);
-        }
     }
     result.total_ms = now_ms() - start;
     return result;
@@ -478,7 +1018,7 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeInit(
     LOGI("llama native init with library dir: %s", path);
     env->ReleaseStringUTFChars(native_lib_dir, path);
     llama_backend_init();
-    LOGI("llama backend initialized");
+    LOGI("llama backend initialized: %s", gpu_diagnostics_json().c_str());
 
     // Cache the LiveStatus streaming hook (optional; generation works without it).
     jclass cls = env->FindClass("com/xiaomi/llmbenchmark/LiveStatus");
@@ -504,14 +1044,48 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeLoad(
         jdouble temperature,
         jdouble top_p,
         jint top_k,
-        jlong seed) {
+        jlong seed,
+        jstring accelerator,
+        jint gpu_layers) {
     release_resources();
     g_threads = std::max(1, static_cast<int>(threads));
     g_temperature = static_cast<float>(temperature);
     g_top_p = static_cast<float>(top_p);
     g_top_k = static_cast<int>(top_k);
     g_seed = static_cast<uint32_t>(seed);
+    normalize_sampling_params(g_temperature, g_top_p, g_top_k, g_seed);
+    g_accelerator_requested = "auto";
+    if (accelerator != nullptr) {
+        const char *accelerator_chars = env->GetStringUTFChars(accelerator, nullptr);
+        if (accelerator_chars != nullptr && std::strlen(accelerator_chars) > 0) {
+            g_accelerator_requested = accelerator_chars;
+        }
+        if (accelerator_chars != nullptr) {
+            env->ReleaseStringUTFChars(accelerator, accelerator_chars);
+        }
+    }
+    g_force_cpu = g_accelerator_requested == "cpu";
+    g_n_gpu_layers = g_force_cpu ? 0 : static_cast<int>(gpu_layers);
+    g_gpu_layers_offloaded = 0;
+    g_gpu_layers_offloaded_actual = -1;
+    g_model_layers = 0;
+    g_gpu_offload_active = false;
+    g_context_offload_kqv = true;
+    g_context_op_offload = true;
+    g_accelerator_active = g_force_cpu ? "cpu" : "unknown";
     g_last_error.clear();
+    g_last_sampling_error.clear();
+    g_last_logits_diagnostics = "{}";
+    clear_backend_log_tail();
+
+    if (g_accelerator_requested == "vulkan_required"
+            && (!llama_supports_gpu_offload() || !has_gpu_device())) {
+        std::ostringstream error;
+        error << "vulkan_required requested but no GPU/IGPU ggml device is available: "
+              << gpu_diagnostics_json();
+        set_last_error(error.str());
+        return 20;
+    }
 
     const char *path = env->GetStringUTFChars(model_path, nullptr);
     struct stat model_stat {};
@@ -522,10 +1096,11 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeLoad(
         env->ReleaseStringUTFChars(model_path, path);
         return 10;
     }
-    LOGI("loading GGUF: %s size=%lld threads=%d gpu_layers=%d",
-         path, static_cast<long long>(model_stat.st_size), g_threads, g_n_gpu_layers);
+    LOGI("loading GGUF: %s size=%lld threads=%d accelerator=%s gpu_layers=%d",
+         path, static_cast<long long>(model_stat.st_size), g_threads,
+         g_accelerator_requested.c_str(), g_n_gpu_layers);
     llama_model_params model_params = llama_model_default_params();
-    model_params.n_gpu_layers = g_n_gpu_layers;  // offload to GPU backend if one is loaded
+    model_params.n_gpu_layers = g_n_gpu_layers;
     g_model = llama_model_load_from_file(path, model_params);
     std::string model_path_copy(path);
     env->ReleaseStringUTFChars(model_path, path);
@@ -537,6 +1112,25 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeLoad(
         release_resources();
         return 1;
     }
+    g_model_layers = llama_model_n_layer(g_model);
+    if (g_gpu_layers_offloaded_actual >= 0) {
+        g_gpu_layers_offloaded = g_gpu_layers_offloaded_actual;
+        g_gpu_offload_active = g_gpu_layers_offloaded_actual > 0;
+    } else if (!g_force_cpu && llama_supports_gpu_offload() && has_gpu_device()) {
+        int requested_layers = g_n_gpu_layers < 0 ? g_model_layers + 1 : g_n_gpu_layers;
+        g_gpu_layers_offloaded = std::max(0, std::min(requested_layers, g_model_layers + 1));
+        g_gpu_offload_active = false;
+    }
+    g_accelerator_active = g_gpu_offload_active ? "vulkan" : "cpu";
+
+    if (g_accelerator_requested == "vulkan_required" && g_gpu_layers_offloaded_actual <= 0) {
+        std::ostringstream error;
+        error << "vulkan_required requested but no model layers were proven offloaded: "
+              << gpu_diagnostics_json();
+        set_last_error(error.str());
+        release_resources();
+        return 21;
+    }
 
     // Load the model's official chat template(s) from GGUF metadata for prompt formatting.
     g_templates = common_chat_templates_init(g_model, "");
@@ -544,7 +1138,8 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeLoad(
         LOGE("common_chat_templates_init returned null; falling back to raw prompt text");
     }
 
-    LOGI("llama model loaded successfully; context will be created per request");
+    LOGI("llama model loaded successfully accelerator_active=%s gpu_layers_offloaded=%d/%d; context will be created per request",
+         g_accelerator_active.c_str(), g_gpu_layers_offloaded, g_model_layers + 1);
     return 0;
 }
 
@@ -552,7 +1147,8 @@ static std::string single_result_json(const BatchResult &result) {
     if (!result.error.empty()) {
         std::ostringstream error_json;
         error_json << "{\"text\":\"\",\"finish_reason\":\"error\",\"error\":\""
-                   << json_escape(result.error) << "\"}";
+                   << json_escape(result.error) << "\",\"sampling_diagnostics\":"
+                   << (g_last_logits_diagnostics.empty() ? "{}" : g_last_logits_diagnostics) << "}";
         return error_json.str();
     }
     const SeqResult &seq = result.seqs.front();
@@ -566,6 +1162,8 @@ static std::string single_result_json(const BatchResult &result) {
     json << "\"decode_latency_ms\":" << result.decode_wall_ms << ",";
     json << "\"total_latency_ms\":" << result.total_ms << ",";
     json << "\"finish_reason\":\"" << json_escape(seq.finish_reason) << "\",";
+    json << "\"error\":\"" << json_escape(seq.error) << "\",";
+    json << "\"sampling_diagnostics\":" << (g_last_logits_diagnostics.empty() ? "{}" : g_last_logits_diagnostics) << ",";
     json << "\"decode_speed_buckets\":" << buckets_json(seq.bucket_tokens, seq.bucket_ms);
     json << "}";
     return json.str();
@@ -697,6 +1295,7 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerateBatch(
         }
         json << "{";
         json << "\"text\":\"" << json_escape(seq.text) << "\",";
+        json << "\"error\":\"" << json_escape(seq.error) << "\",";
         json << "\"prompt_tokens\":" << seq.prompt_tokens << ",";
         json << "\"generated_tokens\":" << seq.generated_tokens << ",";
         json << "\"first_token_latency_ms\":" << seq.first_token_ms << ",";
@@ -712,6 +1311,11 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerateBatch(
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeSystemInfo(JNIEnv *env, jclass) {
     return env->NewStringUTF(llama_print_system_info());
+}
+
+extern "C" JNIEXPORT jstring JNICALL
+Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGpuDiagnostics(JNIEnv *env, jclass) {
+    return env->NewStringUTF(gpu_diagnostics_json().c_str());
 }
 
 extern "C" JNIEXPORT jstring JNICALL

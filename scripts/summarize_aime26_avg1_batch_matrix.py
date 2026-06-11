@@ -95,6 +95,7 @@ def summarize_report(report_dir: pathlib.Path) -> dict[str, Any]:
     rows = read_jsonl(report_dir / "task_results.jsonl")
     model = report_json.get("model") or {}
     options = report_json.get("options") or {}
+    runtime_details = ((report_json.get("runtime") or {}).get("details") or {})
     hardware = report_json.get("hardware") or {}
     batch_metrics = report_json.get("batch_metrics") or []
     generated_tokens = [int(row.get("generated_tokens") or row.get("estimated_output_tokens") or 0) for row in rows]
@@ -112,6 +113,13 @@ def summarize_report(report_dir: pathlib.Path) -> dict[str, Any]:
         "report_dir": str(report_dir),
         "run_id": report_json.get("run_id", ""),
         "backend_id": str(model.get("backend_id") or options.get("backend_id") or ""),
+        "accelerator_requested": str(
+            runtime_details.get("accelerator_requested") or options.get("llama_accelerator") or ""
+        ),
+        "accelerator_active": str(runtime_details.get("accelerator_active") or ""),
+        "gpu_layers_requested": str(runtime_details.get("gpu_layers_requested") or options.get("llama_gpu_layers") or ""),
+        "gpu_layers_offloaded": str(runtime_details.get("gpu_layers_offloaded") or ""),
+        "gpu_offload_active": str(runtime_details.get("gpu_offload_active") or ""),
         "model_id": str(model.get("model_id") or ""),
         "dataset_id": "aime26",
         "evaluation_tier": "official_partial",
@@ -135,6 +143,7 @@ def summarize_report(report_dir: pathlib.Path) -> dict[str, Any]:
         "peak_app_pss_bytes": hardware.get("peak_app_pss_bytes"),
         "peak_thermal_temperature_c": hardware.get("peak_thermal_temperature_c"),
         "native_lib_hash": (report_json.get("runtime") or {}).get("native_library_sha256", ""),
+        "vulkan_lib_hash": runtime_details.get("ggml_vulkan_library_sha256", ""),
         "model_hash": model.get("artifact_sha256", ""),
         "device_fingerprint": (report_json.get("device") or {}).get("fingerprint", ""),
         "batch_metrics": batch_metrics,
@@ -143,12 +152,12 @@ def summarize_report(report_dir: pathlib.Path) -> dict[str, Any]:
 
 
 def add_speedups(runs: list[dict[str, Any]]) -> None:
-    baseline: dict[str, float] = {}
+    baseline: dict[tuple[str, str], float] = {}
     for run in runs:
         if run["batch_size"] == 1:
-            baseline[run["backend_id"]] = float(run["aggregate_tokens_per_second"] or 0.0)
+            baseline[(run["backend_id"], run["accelerator_requested"])] = float(run["aggregate_tokens_per_second"] or 0.0)
     for run in runs:
-        base = baseline.get(run["backend_id"], 0.0)
+        base = baseline.get((run["backend_id"], run["accelerator_requested"]), 0.0)
         run["speedup_vs_batch1"] = (
             float(run["aggregate_tokens_per_second"]) / base if base > 0.0 else None
         )
@@ -163,16 +172,18 @@ def write_markdown(path: pathlib.Path, runs: list[dict[str, Any]]) -> None:
         "",
         "## Batch Summary",
         "",
-        "| Backend | Batch | Rows | Avg@1 | Errors | Hit max | Agg tok/s | Speedup | Peak PSS MiB | Peak thermal C |",
-        "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
+        "| Backend | Accelerator | Active | Batch | Rows | Avg@1 | Errors | Hit max | Agg tok/s | Speedup | Peak PSS MiB | Peak thermal C |",
+        "|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
     ]
-    for run in sorted(runs, key=lambda r: (r["backend_id"], r["batch_size"])):
+    for run in sorted(runs, key=lambda r: (r["backend_id"], r["accelerator_requested"], r["batch_size"])):
         peak_pss = run.get("peak_app_pss_bytes") or 0
         peak_thermal = run.get("peak_thermal_temperature_c")
         speedup = run.get("speedup_vs_batch1")
         lines.append(
-            "| {backend} | {batch} | {rows} | {score:.4f} | {errors} | {hit} | {tps:.2f} | {speedup} | {pss:.1f} | {thermal} |".format(
+            "| {backend} | {accel} | {active} | {batch} | {rows} | {score:.4f} | {errors} | {hit} | {tps:.2f} | {speedup} | {pss:.1f} | {thermal} |".format(
                 backend=run["backend_id"],
+                accel=run["accelerator_requested"] or "n/a",
+                active=run["accelerator_active"] or "n/a",
                 batch=run["batch_size"],
                 rows=run["row_count"],
                 score=run["avg1_score"],
@@ -185,9 +196,9 @@ def write_markdown(path: pathlib.Path, runs: list[dict[str, Any]]) -> None:
             )
         )
     lines += ["", "## Decode Speed By KV-Cache Length", ""]
-    for run in sorted(runs, key=lambda r: (r["backend_id"], r["batch_size"])):
+    for run in sorted(runs, key=lambda r: (r["backend_id"], r["accelerator_requested"], r["batch_size"])):
         lines += [
-            f"### {run['backend_id']} batch={run['batch_size']}",
+            f"### {run['backend_id']} accelerator={run['accelerator_requested'] or 'n/a'} active={run['accelerator_active'] or 'n/a'} batch={run['batch_size']}",
             "",
             "| KV window | tokens | decode ms | tok/s |",
             "|---|---:|---:|---:|",
@@ -218,6 +229,7 @@ def main() -> int:
             "avg_policy": "Avg@1",
             "batch_sizes": sorted({run["batch_size"] for run in runs}),
             "backends": sorted({run["backend_id"] for run in runs}),
+            "accelerators": sorted({run["accelerator_requested"] for run in runs}),
         },
         "runs": runs,
     }

@@ -81,6 +81,7 @@ final class ReportWriter {
         builder.append("- Artifact: ").append(report.model.artifactDisplayName()).append('\n');
         builder.append("- Benchmark: ").append(report.benchmark.displayName).append(" (`").append(report.benchmark.benchmarkId).append("`)\n");
         builder.append("- Warmup/repeat: ").append(report.options.warmupCount).append('/').append(report.options.repeatCount).append('\n');
+        appendRuntimeSummary(builder, report);
         builder.append("- Model load: ").append(report.modelLoadMs).append(" ms\n");
         builder.append("- Passed: ").append(report.passedCount()).append('/').append(report.results.size()).append('\n');
         builder.append("- Failed items: ").append(report.failureCount()).append('\n');
@@ -125,6 +126,49 @@ final class ReportWriter {
         appendDecodeSpeedProfile(builder, report);
         appendBatchThroughput(builder, report);
         return builder.toString();
+    }
+
+    private static void appendRuntimeSummary(StringBuilder builder, BenchmarkRunReport report) {
+        if (!ModelConfig.BACKEND_LLAMA_CPP.equals(report.options.backendId)) {
+            return;
+        }
+        java.util.Map<String, String> details = report.runtimeDiagnostics.details;
+        String active = details.getOrDefault("accelerator_active", details.getOrDefault("accelerator_requested", "unknown"));
+        builder.append("- llama.cpp accelerator: ")
+                .append(active)
+                .append(" (requested `")
+                .append(details.getOrDefault("accelerator_requested", report.options.llamaAccelerator))
+                .append("`, gpu_layers `")
+                .append(details.getOrDefault("gpu_layers_requested", String.valueOf(report.options.llamaGpuLayers)))
+                .append("`, offload_active `")
+                .append(details.getOrDefault("gpu_offload_active", "unknown"))
+                .append("`, offloaded_estimate `")
+                .append(details.getOrDefault("gpu_layers_offloaded", "unknown"))
+                .append("`, offloaded_actual `")
+                .append(details.getOrDefault("gpu_layers_offloaded_actual", "unknown"))
+                .append("`, proof `")
+                .append(details.getOrDefault("gpu_offload_proof", "unknown"))
+                .append("`)\n");
+        builder.append("- llama.cpp Vulkan lib: ")
+                .append(details.getOrDefault("ggml_vulkan_library_sha256", "missing"))
+                .append('\n');
+        builder.append("- llama.cpp sampling: ")
+                .append(details.getOrDefault("sampling_policy_version", "unknown"))
+                .append(" (temp `")
+                .append(details.getOrDefault("sampling_temperature", "unknown"))
+                .append("`, top_p `")
+                .append(details.getOrDefault("sampling_top_p", "unknown"))
+                .append("`, top_k `")
+                .append(details.getOrDefault("sampling_top_k", "unknown"))
+                .append("`, min_keep `")
+                .append(details.getOrDefault("sampling_min_keep", "unknown"))
+                .append("`)\n");
+        String nativeError = details.getOrDefault("native_generation_error", "");
+        if (!nativeError.isEmpty()) {
+            builder.append("- llama.cpp native generation error: ")
+                    .append(escapeMd(shorten(nativeError, 180)))
+                    .append('\n');
+        }
     }
 
     private static void appendDecodeSpeedProfile(StringBuilder builder, BenchmarkRunReport report) {
@@ -197,6 +241,9 @@ final class ReportWriter {
         json.put("smoke_type", report.options.smokeType);
         json.put("warmup_count", report.options.warmupCount);
         json.put("repeat_count", report.options.repeatCount);
+        json.put("batch_size", report.options.batchSize);
+        json.put("llama_accelerator", report.options.llamaAccelerator);
+        json.put("llama_gpu_layers", report.options.llamaGpuLayers);
         json.put("task_count", report.benchmark.items.size());
         json.put("expected_generation_log_rows", report.benchmark.items.size() * report.options.repeatCount);
         json.put("actual_generation_log_rows", report.results.size());

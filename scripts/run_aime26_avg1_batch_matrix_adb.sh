@@ -39,13 +39,13 @@ BUNDLE_DIR="$BUNDLE_DIR" "$ROOT/scripts/stage_table_reproduction_bundle_adb.sh"
 IFS=',' read -r -a batch_values <<<"$BATCH_SIZES"
 declare -a report_dirs=()
 declare -a backend_specs=(
-  "llama_cpp:minicpm5-1b-thinking-q4"
-  "mlc:minicpm5-1b-thinking-mlc"
+  "llama_cpp:minicpm5-1b-thinking-q4:cpu:-1"
+  "llama_cpp:minicpm5-1b-thinking-q4:vulkan_required:-1"
+  "mlc:minicpm5-1b-thinking-mlc:auto:-1"
 )
 
 for spec in "${backend_specs[@]}"; do
-  backend="${spec%%:*}"
-  model="${spec#*:}"
+  IFS=':' read -r backend model llama_accelerator llama_gpu_layers <<<"$spec"
   for batch_index in "${!batch_values[@]}"; do
     batch_size="${batch_values[$batch_index]}"
     batch_size="$(echo "$batch_size" | tr -d '[:space:]')"
@@ -54,7 +54,7 @@ for spec in "${backend_specs[@]}"; do
     if [[ "$batch_index" == "$((${#batch_values[@]} - 1))" ]]; then
       unload_after_run=1
     fi
-    echo "== AIME26 Avg@1 backend=$backend model=$model batch_size=$batch_size =="
+    echo "== AIME26 Avg@1 backend=$backend model=$model accelerator=$llama_accelerator gpu_layers=$llama_gpu_layers batch_size=$batch_size =="
     RUNNER=service \
       BACKEND_ID="$backend" \
       MODEL_ID="$model" \
@@ -64,6 +64,8 @@ for spec in "${backend_specs[@]}"; do
       WARMUP_COUNT=0 \
       BATCH_SIZE="$batch_size" \
       UNLOAD_AFTER_RUN="$unload_after_run" \
+      LLAMA_ACCELERATOR="$llama_accelerator" \
+      LLAMA_GPU_LAYERS="$llama_gpu_layers" \
       WAIT="$WAIT" \
       PULL="$PULL" \
       TIMEOUT_SECONDS="$TIMEOUT_SECONDS" \

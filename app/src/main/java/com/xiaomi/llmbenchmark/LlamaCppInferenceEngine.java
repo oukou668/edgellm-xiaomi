@@ -22,12 +22,24 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
     private ModelConfig model;
     private RuntimeDiagnostics diagnostics = RuntimeDiagnostics.unknown();
     private boolean nativeReady;
+    private String llamaAccelerator = BenchmarkRunOptions.LLAMA_ACCELERATOR_AUTO;
+    private int llamaGpuLayers = -1;
 
     LlamaCppInferenceEngine(Context context) {
         this.context = context.getApplicationContext();
         loadLibraryOnce();
         nativeInit(this.context.getApplicationInfo().nativeLibraryDir);
         nativeReady = true;
+    }
+
+    void configure(BenchmarkRunOptions options) {
+        if (options == null) {
+            llamaAccelerator = BenchmarkRunOptions.LLAMA_ACCELERATOR_AUTO;
+            llamaGpuLayers = -1;
+            return;
+        }
+        llamaAccelerator = options.llamaAccelerator;
+        llamaGpuLayers = options.llamaGpuLayers;
     }
 
     @Override
@@ -52,11 +64,18 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         details.put("default_top_p", String.valueOf(model.defaultParams.topP));
         details.put("default_thinking_enabled", String.valueOf(model.defaultParams.thinkingEnabled));
         details.put("chat_template", "official_gguf_template");
-        details.put("gpu_offload", "n_gpu_layers=all (GPU backend per build; see system_info for active device)");
+        details.put("accelerator_requested", llamaAccelerator);
+        details.put("gpu_layers_requested", String.valueOf(llamaGpuLayers));
+        putNativeLib(details, "llmbenchmark_llama", System.mapLibraryName(LIB_NAME));
+        putNativeLib(details, "ggml_vulkan", System.mapLibraryName("ggml-vulkan"));
         String loadKey =
                 gguf.getAbsolutePath()
                         + "|threads="
                         + threads
+                        + "|accelerator="
+                        + llamaAccelerator
+                        + "|gpu_layers="
+                        + llamaGpuLayers
                         + "|temperature="
                         + model.defaultParams.temperature
                         + "|top_p="
@@ -65,15 +84,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                         + model.defaultParams.topK
                         + "|seed="
                         + model.defaultParams.seed;
-        diagnostics =
-                new RuntimeDiagnostics(
-                        model.backendId,
-                        "llama.cpp",
-                        "",
-                        NativeLibraryInfo.path(context, System.mapLibraryName(LIB_NAME)),
-                        NativeLibraryInfo.sha256(context, System.mapLibraryName(LIB_NAME)),
-                        BuildConfig.LLAMA_CPP_GIT_COMMIT,
-                        details);
+        diagnostics = diagnosticsFromDetails(model, details);
         synchronized (NATIVE_LOCK) {
             boolean reused = loadKey.equals(loadedModelKey);
             if (!reused) {
@@ -86,10 +97,14 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                                 model.defaultParams.temperature,
                                 model.defaultParams.topP,
                                 model.defaultParams.topK,
-                                model.defaultParams.seed);
+                                model.defaultParams.seed,
+                                llamaAccelerator,
+                                llamaGpuLayers);
                 if (result != 0) {
                     details.put("native_load_result", String.valueOf(result));
                     details.put("native_last_error", nativeLastError());
+                    mergeGpuDiagnostics(details, nativeGpuDiagnostics());
+                    diagnostics = diagnosticsFromDetails(model, details);
                     throw new IllegalStateException(
                             "llama.cpp native load failed: " + result + " " + nativeLastError());
                 }
@@ -98,15 +113,8 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             this.model = model;
             details.put("model_reused", String.valueOf(reused));
             details.put("system_info", nativeSystemInfo());
-            diagnostics =
-                    new RuntimeDiagnostics(
-                            model.backendId,
-                            "llama.cpp",
-                            "",
-                            NativeLibraryInfo.path(context, System.mapLibraryName(LIB_NAME)),
-                            NativeLibraryInfo.sha256(context, System.mapLibraryName(LIB_NAME)),
-                            BuildConfig.LLAMA_CPP_GIT_COMMIT,
-                            details);
+            mergeGpuDiagnostics(details, nativeGpuDiagnostics());
+            diagnostics = diagnosticsFromDetails(model, details);
         }
     }
 
@@ -134,6 +142,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                             item.id);
         }
         JSONObject json = new JSONObject(rawJson);
+        refreshNativeDiagnostics(json.optString("error", ""));
         return new GenerationResult(
                 json.optString("text", ""),
                 json.optLong("first_token_latency_ms", -1L),
@@ -143,6 +152,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                 json.optInt("prompt_tokens", 0),
                 json.optInt("generated_tokens", 0),
                 json.optString("finish_reason", "unknown"),
+                json.optString("error", ""),
                 diagnostics,
                 DecodeSpeedBucket.listFromJson(json.optJSONArray("decode_speed_buckets")));
     }
@@ -181,6 +191,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                             itemIds);
         }
         JSONObject json = new JSONObject(rawJson);
+        refreshNativeDiagnostics(json.optString("error", ""));
         long decodeWall = json.optLong("aggregate_decode_latency_ms", -1L);
         long prefillWall = json.optLong("aggregate_prefill_latency_ms", -1L);
         int totalGenerated = json.optInt("total_generated_tokens", 0);
@@ -200,6 +211,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                             seq.optInt("prompt_tokens", 0),
                             seq.optInt("generated_tokens", 0),
                             seq.optString("finish_reason", "unknown"),
+                            seq.optString("error", ""),
                             diagnostics,
                             DecodeSpeedBucket.listFromJson(seq.optJSONArray("decode_speed_buckets"))));
         }
@@ -242,7 +254,9 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             double temperature,
             double topP,
             int topK,
-            long seed);
+            long seed,
+            String accelerator,
+            int gpuLayers);
 
     private static native String nativeGenerate(
             String prompt,
@@ -272,7 +286,65 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
 
     private static native String nativeSystemInfo();
 
+    private static native String nativeGpuDiagnostics();
+
     private static native String nativeLastError();
 
     private static native void nativeUnload();
+
+    private RuntimeDiagnostics diagnosticsFromDetails(ModelConfig model, Map<String, String> details) {
+        return new RuntimeDiagnostics(
+                model.backendId,
+                "llama.cpp",
+                "",
+                NativeLibraryInfo.path(context, System.mapLibraryName(LIB_NAME)),
+                NativeLibraryInfo.sha256(context, System.mapLibraryName(LIB_NAME)),
+                BuildConfig.LLAMA_CPP_GIT_COMMIT,
+                details);
+    }
+
+    private void putNativeLib(Map<String, String> details, String keyPrefix, String mappedLibraryName) {
+        File file = NativeLibraryInfo.nativeLibrary(context, mappedLibraryName);
+        details.put(keyPrefix + "_library_path", file.getAbsolutePath());
+        details.put(
+                keyPrefix + "_library_sha256",
+                file.exists() ? NativeLibraryInfo.sha256(context, mappedLibraryName) : "missing");
+    }
+
+    private void refreshNativeDiagnostics(String generationError) {
+        if (model == null) {
+            return;
+        }
+        synchronized (NATIVE_LOCK) {
+            Map<String, String> details = new LinkedHashMap<>(diagnostics.details);
+            if (generationError != null && !generationError.isEmpty()) {
+                details.put("native_generation_error", generationError);
+            }
+            mergeGpuDiagnostics(details, nativeGpuDiagnostics());
+            diagnostics = diagnosticsFromDetails(model, details);
+        }
+    }
+
+    private static void mergeGpuDiagnostics(Map<String, String> details, String rawJson) {
+        try {
+            JSONObject json = new JSONObject(rawJson == null ? "{}" : rawJson);
+            JSONArray names = json.names();
+            if (names == null) {
+                return;
+            }
+            for (int i = 0; i < names.length(); i++) {
+                String key = names.optString(i);
+                Object value = json.opt(key);
+                details.put(
+                        key,
+                        value instanceof JSONObject || value instanceof JSONArray
+                                ? value.toString()
+                                : String.valueOf(value));
+            }
+        } catch (Exception error) {
+            details.put(
+                    "gpu_diagnostics_error",
+                    error.getMessage() == null ? error.getClass().getSimpleName() : error.getMessage());
+        }
+    }
 }

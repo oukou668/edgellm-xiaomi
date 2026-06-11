@@ -1,0 +1,1 @@
+{"task_id":"llama_one_token_smoke_001","language":"en","prompt_class":"short","category":"smoke","prompt":"Reply with one short greeting token.","judge_rule":"external_scorer","max_new_tokens":1,"generation_params":{"context_window_size":2048,"max_tokens":1,"temperature":0.9,"top_p":0.95,"top_k":0,"seed":0,"thinking_enabled":false},"tags":["llama","one_token","vulkan_smoke"]}

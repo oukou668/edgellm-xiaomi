@@ -40,6 +40,24 @@ val mlcLlmRepo = providers.gradleProperty("mlcLlmSourceDir")
 // "opencl" (Adreno-tuned; needs OpenCL headers + ICD loader on the build host), or "cpu"/"none"
 // to disable GPU offload. Override with -PllamaGpuBackend=opencl.
 val llamaGpuBackend = providers.gradleProperty("llamaGpuBackend").orElse("vulkan").get().lowercase()
+val androidNdkHome = providers.environmentVariable("ANDROID_NDK_HOME")
+    .orElse(providers.environmentVariable("ANDROID_NDK_ROOT"))
+    .orElse(providers.environmentVariable("ANDROID_HOME").map { "$it/ndk/28.2.13676358" })
+    .orElse(providers.environmentVariable("ANDROID_SDK_ROOT").map { "$it/ndk/28.2.13676358" })
+    .orElse("${System.getProperty("user.home")}/Library/Android/sdk/ndk/28.2.13676358")
+    .get()
+val hostTag = when {
+    System.getProperty("os.name").lowercase().contains("mac") -> "darwin-x86_64"
+    System.getProperty("os.name").lowercase().contains("win") -> "windows-x86_64"
+    else -> "linux-x86_64"
+}
+val vulkanGlslc = providers.gradleProperty("vulkanGlslc")
+    .orElse("$androidNdkHome/shader-tools/$hostTag/glslc")
+    .get()
+val vulkanHeadersInclude = providers.gradleProperty("vulkanHeadersInclude")
+    .orElse(providers.environmentVariable("VULKAN_HEADERS_INCLUDE"))
+    .orElse("/opt/homebrew/include")
+    .get()
 
 android {
     namespace = "com.xiaomi.llmbenchmark"
@@ -89,7 +107,11 @@ android {
                 // Enable a GPU ggml backend (loaded at runtime via GGML_BACKEND_DL). Layers are
                 // offloaded to the GPU at model load (n_gpu_layers in llama_jni.cpp).
                 arguments += when (llamaGpuBackend) {
-                    "vulkan" -> listOf("-DGGML_VULKAN=ON")
+                    "vulkan" -> listOf(
+                        "-DGGML_VULKAN=ON",
+                        "-DVulkan_GLSLC_EXECUTABLE=$vulkanGlslc",
+                        "-DVulkan_INCLUDE_DIR=$vulkanHeadersInclude"
+                    )
                     "opencl" -> listOf("-DGGML_OPENCL=ON", "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON")
                     else -> emptyList()
                 }

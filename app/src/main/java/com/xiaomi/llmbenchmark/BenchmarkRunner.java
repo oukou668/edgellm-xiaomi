@@ -42,7 +42,11 @@ final class BenchmarkRunner {
                         + ", batch_size="
                         + options.batchSize
                         + ", unload_after_run="
-                        + options.unloadAfterRun);
+                        + options.unloadAfterRun
+                        + ", llama_accelerator="
+                        + options.llamaAccelerator
+                        + ", llama_gpu_layers="
+                        + options.llamaGpuLayers);
 
         LiveStatus.get()
                 .startJob(
@@ -69,6 +73,9 @@ final class BenchmarkRunner {
             modelDir = downloader.ensureModel(model, progress);
             ModelPreflight.verify(model, modelDir);
             engine = EngineFactory.create(context, model.backendId);
+            if (engine instanceof LlamaCppInferenceEngine) {
+                ((LlamaCppInferenceEngine) engine).configure(options);
+            }
             if (options.isBatched() && engine instanceof MlcInferenceEngine) {
                 ((MlcInferenceEngine) engine).setServingMode(true);
                 progress.onProgress("MLC serving mode enabled for batched run.");
@@ -306,18 +313,25 @@ final class BenchmarkRunner {
                         || ("external_scorer".equals(item.judgeRule)
                                 ? generation.text != null && !generation.text.trim().isEmpty()
                                 : Judge.score(item, generation.text));
-        String error = "";
+        String error = generation.error == null ? "" : generation.error;
+        if (!error.isEmpty()) {
+            passed = false;
+        }
         if (options.isRealSmoke()) {
             if (generation.text == null || generation.text.trim().isEmpty()) {
                 passed = false;
-                error = "real_model_smoke produced empty output";
+                error =
+                        error.isEmpty()
+                                ? "real_model_smoke produced empty output"
+                                : error + "; real_model_smoke produced empty output";
             } else if (generation.promptTokens <= 0 || generation.estimatedOutputTokens <= 0) {
                 passed = false;
-                error =
+                String tokenError =
                         "real_model_smoke token gate failed: prompt_tokens="
                                 + generation.promptTokens
                                 + ", generated_tokens="
                                 + generation.estimatedOutputTokens;
+                error = error.isEmpty() ? tokenError : error + "; " + tokenError;
             }
         }
         double tps =

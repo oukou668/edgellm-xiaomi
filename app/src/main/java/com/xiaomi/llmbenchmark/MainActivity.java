@@ -37,6 +37,8 @@ public final class MainActivity extends Activity {
     private static final String EXTRA_BATCH_SIZE = "batch_size";
     private static final String EXTRA_STRESS_MODE = "stress_mode";
     private static final String EXTRA_BUNDLE_ID = "bundle_id";
+    private static final String EXTRA_LLAMA_ACCELERATOR = "llama_accelerator";
+    private static final String EXTRA_LLAMA_GPU_LAYERS = "llama_gpu_layers";
 
     private static final int[] BATCH_SIZES = {1, 2, 4};
     private static final long POLL_INTERVAL_MS = 150L;
@@ -444,7 +446,10 @@ public final class MainActivity extends Activity {
                         intent.getIntExtra(EXTRA_REPEAT_COUNT, 1),
                         intent.getIntExtra(EXTRA_WARMUP_COUNT, 0),
                         batchSize,
-                        intent.getBooleanExtra(EXTRA_STRESS_MODE, false));
+                        intent.getBooleanExtra(EXTRA_STRESS_MODE, false),
+                        intent.getBooleanExtra("unload_after_run", false),
+                        intent.getStringExtra(EXTRA_LLAMA_ACCELERATOR),
+                        intent.getIntExtra(EXTRA_LLAMA_GPU_LAYERS, -1));
         final BenchmarkConfig selectedBenchmark = benchmark;
         mainHandler.post(() -> runBenchmark(model, selectedBenchmark, options));
     }
