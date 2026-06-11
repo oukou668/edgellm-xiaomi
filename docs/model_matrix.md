@@ -34,3 +34,24 @@ reproduction.
 Formal reproduction params are fixed at `temperature=0.9`, `top_p=0.95`, and
 `thinking_enabled=true`. Dataset-specific `max_tokens` and profile IDs are
 defined in `configs/table_reproduction_v1.json`.
+
+## MiniCPM5 AIME2026 Avg@1 Diagnostic
+
+This diagnostic suite is not an official leaderboard run. It uses AIME2026
+`Avg@1` only, marks results as `official_partial / avg1_diagnostic`, and keeps
+`official_benchmark=false` plus `average_eligible=false`.
+
+| backend_id | model_id | artifact | reproducibility | runtime config |
+| --- | --- | --- | --- | --- |
+| `llama_cpp` | `minicpm5-1b-thinking-q4` | `openbmb/MiniCPM5-1B-GGUF` / `MiniCPM5-1B-Q4_K_M.gguf` | revision `87007042419d30c1d8f38ef065424ee33870831e`, sha256 `81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa`, size `688065920` | `Q4_K_M`, context `81920`, max tokens `65536`, temperature `0.9`, top_p `0.95`, Thinking enabled |
+| `mlc` | `minicpm5-1b-thinking-mlc` | `christophdet/MiniCPM5-1B-q4f16_1-MLC` / subdir `MiniCPM5-1B-q4f16_1-MLC` | revision `9fb405731c2cf886a32705ddf4785c6583896720`, model_lib `minicpm5_1b_q4f16_1_ctx80k_android` | `q4f16_1`, context `81920`, prefill chunk `128`, max tokens `65536`, temperature `0.9`, top_p `0.95`, Thinking enabled |
+
+Run matrix:
+
+- Backends: `llama_cpp`, `mlc`
+- Batch sizes: `1`, `2`, `4`
+- Dataset: `aime26`
+- Samples: `30 problems x 1 sample`
+- KV-cache speed buckets: `0-4096`, `4096-8192`, ..., `61440-65536`
+- llama.cpp bucket positions are native KV positions.
+- MLC bucket positions are approximate cumulative token positions.

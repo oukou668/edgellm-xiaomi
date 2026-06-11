@@ -111,6 +111,7 @@ final class BenchmarkRunReport {
         modelJson.put("hf_repo", model.hfRepo);
         modelJson.put("hf_revision", model.hfRevision);
         modelJson.put("mlc_model_url", model.mlcModelUrl);
+        modelJson.put("model_subdir", model.modelSubdir);
         modelJson.put("model_lib", model.modelLib);
         modelJson.put("artifact_filename", model.artifactFilename);
         modelJson.put("artifact_sha256", model.artifactSha256);

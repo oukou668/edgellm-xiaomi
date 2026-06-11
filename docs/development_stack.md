@@ -15,6 +15,9 @@ backends: MLC LLM and llama.cpp.
 - SDK CMake: 3.31.6
 - llama.cpp commit: 78433f606fde4d7934a02dcbfd910438d28beccd
 - MLC source checkout: /Users/chenhaotian/code/iPhone/mlc-llm
+- MLC Python FFI wheel: apache-tvm-ffi 0.1.11, pinned by
+  `scripts/bootstrap_mlc_python_env.sh` for compatibility with the current TVM
+  checkout.
 
 AGP 9.0.1 is intentionally pinned for first-round stability. AGP 9.2+ is
 deferred unless a build failure requires it.
@@ -63,3 +66,21 @@ Expected device smoke gates:
 BACKEND_ID=mlc SMOKE_TYPE=real_model_smoke ./scripts/run_backend_smoke_adb.sh
 BACKEND_ID=llama_cpp SMOKE_TYPE=real_model_smoke ./scripts/run_backend_smoke_adb.sh
 ```
+
+MiniCPM5 AIME2026 Avg@1 batch/KV diagnostic:
+
+```bash
+python3 scripts/fetch_table_reproduction_datasets.py --datasets aime26 --allow-missing
+python3 scripts/prepare_table_reproduction_bundle.py \
+  --suite avg1_diagnostic \
+  --model-id minicpm5-1b-thinking-q4 \
+  --datasets aime26
+MODEL_ID=minicpm5-1b-thinking-q4 ./scripts/fetch_gguf_model.sh
+MLC_SMOKE_MODEL_ID=minicpm5-1b-thinking-mlc ./scripts/package_mlc_android.sh
+BUNDLE_DIR=<generated-bundle> ./scripts/run_aime26_avg1_batch_matrix_adb.sh
+```
+
+The matrix runner executes `llama_cpp` and `mlc` with `BATCH_SIZE=1,2,4`.
+It writes per-run Android reports and, when reports are pulled locally,
+`scripts/summarize_aime26_avg1_batch_matrix.py` emits the Avg@1, batch
+speedup, and KV-cache bucket summary.

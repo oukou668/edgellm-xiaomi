@@ -39,6 +39,9 @@ cat "$host_hash_file"
 "$ADB" shell "run-as '$PACKAGE' sh -c 'rm -rf \"$tmp_device_dir\" && mkdir -p \"$(dirname "$tmp_device_dir")\" && mkdir -p \"$tmp_device_dir\"'"
 COPYFILE_DISABLE=1 tar -cf - -C "$HOST_MODEL_DIR" . | "$ADB" exec-in run-as "$PACKAGE" sh -c "tar -xf - -C '$tmp_device_dir'"
 "$ADB" shell "run-as '$PACKAGE' sh -c 'rm -rf \"$DEVICE_MODEL_DIR\" && mv \"$tmp_device_dir\" \"$DEVICE_MODEL_DIR\"'"
+if [[ -f "$HOST_MODEL_DIR/manifest.json" ]]; then
+  "$ADB" exec-in run-as "$PACKAGE" sh -c "cat > '$DEVICE_MODEL_DIR/manifest.json'" < "$HOST_MODEL_DIR/manifest.json"
+fi
 if "$ADB" shell "run-as '$PACKAGE' sh -c 'command -v sha256sum >/dev/null 2>&1'" >/dev/null 2>&1; then
   "$ADB" shell "run-as '$PACKAGE' sh -c 'cd \"$DEVICE_MODEL_DIR\" && find . -maxdepth 2 -type f -print | sort | while read f; do sha256sum \"\$f\" | awk '\''{print \$1 \" \" \$2}'\'' | sed '\''s# \\./# #'\'' ; done'" | tr -d '\r' > "$host_hash_file.device" || true
   echo "Device sha256 manifest:"

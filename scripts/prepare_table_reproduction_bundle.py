@@ -239,7 +239,7 @@ def harness_replay_entry(row, dataset, profile, model_id, artifact_hash, prompt,
 
 
 def select_rows(rows, suite_kind, dataset_id, profile):
-    if suite_kind == "full":
+    if suite_kind in {"full", "avg1_diagnostic"}:
         selected = rows
     elif suite_kind == "parser_smoke":
         selected = [min(rows, key=prompt_length)]
@@ -306,7 +306,11 @@ def row_to_benchmark_item(row, dataset, profile, model_id, artifact_hash, suite_
         "scorer_id": dataset["scorer_id"],
         "parser_id": dataset["parser_id"],
         "profile_group_id": dataset["profile_group_id"],
-        "generation_profile_id": f"{dataset['profile_group_id']}_{profile['context_window_size']}_{profile['max_tokens']}",
+        "generation_profile_id": (
+            "avg1_diagnostic"
+            if suite_kind == "avg1_diagnostic"
+            else f"{dataset['profile_group_id']}_{profile['context_window_size']}_{profile['max_tokens']}"
+        ),
         "dataset_artifact_hash": artifact_hash,
         "official_table_score": dataset["official_table_scores"].get(model_id),
         "max_new_tokens": max_tokens,
@@ -316,6 +320,11 @@ def row_to_benchmark_item(row, dataset, profile, model_id, artifact_hash, suite_
             "source_revision": dataset["source_revision"],
             "prompt_builder_id": dataset["prompt_builder_id"],
             "formal_max_tokens": profile["max_tokens"],
+            "suite_kind": suite_kind,
+            "repeat_policy": "avg1_diagnostic" if suite_kind == "avg1_diagnostic" else dataset.get("required_coverage", ""),
+            "samples_per_problem": row.get("_avg_sample_count", 1),
+            "official_benchmark": False,
+            "average_eligible": False,
             "avg_sample_index": row.get("_avg_sample_index", 0),
             "avg_sample_count": row.get("_avg_sample_count", 1),
             "official_eval_metadata": row.get("official_eval_metadata") if isinstance(row.get("official_eval_metadata"), dict) else {},
@@ -344,7 +353,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--suite",
-        choices=["parser_smoke", "protocol_smoke", "full"],
+        choices=["parser_smoke", "protocol_smoke", "full", "avg1_diagnostic"],
         default="parser_smoke",
     )
     parser.add_argument("--model-id", required=True)
@@ -413,6 +422,9 @@ def main():
         "datasets": [d["dataset_id"] for d in suite_datasets],
         "selected_datasets": [d["dataset_id"] for d in suite_datasets],
         "official_loop": bool(args.suite == "full" and selected_datasets),
+        "repeat_policy": "avg1_diagnostic" if args.suite == "avg1_diagnostic" else args.suite,
+        "samples_per_problem": 1 if args.suite == "avg1_diagnostic" else None,
+        "average_eligible": False,
         "blockers": blockers,
         "expected_generation_log_rows_for_repeat_1": len(benchmark_rows),
     }

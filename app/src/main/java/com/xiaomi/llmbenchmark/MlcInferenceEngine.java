@@ -46,6 +46,14 @@ final class MlcInferenceEngine implements InferenceEngine {
 
     @Override
     public void load(ModelConfig model, File modelDir) throws Exception {
+        File loadDir = modelDir;
+        if (model.modelSubdir != null && !model.modelSubdir.isEmpty()) {
+            loadDir = new File(modelDir, model.modelSubdir);
+        }
+        if (!new File(loadDir, "mlc-chat-config.json").isFile()) {
+            throw new IllegalStateException("MLC model directory missing mlc-chat-config.json: "
+                    + loadDir.getAbsolutePath());
+        }
         loadKnownNativeLibraries();
         Class<?> engineClass = Class.forName("ai.mlc.mlcllm.JSONFFIEngine");
         Class<?> callbackClass = Class.forName("ai.mlc.mlcllm.JSONFFIEngine$KotlinFunction");
@@ -76,7 +84,7 @@ final class MlcInferenceEngine implements InferenceEngine {
 
         String mode = servingMode ? "server" : "interactive";
         JSONObject config = new JSONObject();
-        config.put("model", modelDir.getAbsolutePath());
+        config.put("model", loadDir.getAbsolutePath());
         if (model.modelLib != null && !model.modelLib.isEmpty()) {
             config.put("model_lib", "system://" + model.modelLib);
         }
@@ -85,7 +93,9 @@ final class MlcInferenceEngine implements InferenceEngine {
         reload.invoke(engine, config.toString());
         Log.i(TAG, "MLC reload returned.");
         Map<String, String> details = new LinkedHashMap<>();
-        details.put("model_path", modelDir.getAbsolutePath());
+        details.put("model_path", loadDir.getAbsolutePath());
+        details.put("model_root", modelDir.getAbsolutePath());
+        details.put("model_subdir", model.modelSubdir);
         details.put("model_id", model.modelId);
         details.put("hf_repo", model.hfRepo);
         details.put("hf_revision", model.hfRevision);

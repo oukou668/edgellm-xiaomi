@@ -169,6 +169,63 @@ or runtime-generated tokens, reported prompt/generated token counts greater than
 zero, recorded runtime diagnostics and native hashes, and completed three
 scored repeats without app process crash on their final accepted runs.
 
+### MiniCPM5 AIME2026 Avg@1 Batch/KV Diagnostic 2026-06-11
+
+Scope: MiniCPM5-1B on AIME2026 `Avg@1`, not `@Avg16`, and not official
+leaderboard average. Results are intended to be marked
+`official_partial / avg1_diagnostic` with `official_benchmark=false` and
+`average_eligible=false`.
+
+Code identity:
+
+- App repo: `/Users/chenhaotian/code/android/edgellm-xiaomi`
+- App branch: `stress-test`
+- App base commit: `dc7bedcaf4604e74301c8dfc31646e7253179c5a`
+- App dirty flag: dirty, implementation changes pending commit
+- MLC LLM source: `/Users/chenhaotian/code/iPhone/mlc-llm`
+- MLC LLM commit: `2008fe8343e1f40ef89ee57b9287aebcf1b86c98`
+- TVM submodule commit: `b628d91fac716679db539884a55f8c6651f54dea`
+
+| Start | End | Command | Result | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-06-11 10:20 | 2026-06-11 10:20 | `git show --stat --oneline --decorate HEAD` and source inspection | pass | Confirmed previous commit `dc7bedc` added batch generation and `DecodeSpeedBucket.WIDTH=4096`. |
+| 2026-06-11 10:21 | 2026-06-11 10:23 | HF API checks for MiniCPM5 GGUF/MLC and MathArena AIME2026 | pass | Confirmed MiniCPM5 GGUF metadata and found usable MLC conversion repo `christophdet/MiniCPM5-1B-q4f16_1-MLC` at revision `9fb405731c2cf886a32705ddf4785c6583896720`. |
+| 2026-06-11 10:23 | 2026-06-11 10:27 | code edits | pass | Replaced `aime_2026.jsonl` placeholders with 30 MathArena rows, added `avg1_diagnostic` bundle mode, added MLC `model_subdir`, nested HF package support, batch matrix runner, and host summary script. |
+| 2026-06-11 10:28 | 2026-06-11 10:28 | `python3 -m json.tool ...`, `python3 -m py_compile ...`, `bash -n ...` | pass | JSON, Python, and Bash syntax checks passed. |
+| 2026-06-11 10:29 | 2026-06-11 10:29 | `python3 -m unittest Tests/Python/test_aime26_avg1_diagnostic.py` | pass | AIME2026 asset has 30 non-placeholder rows; Avg@1 bundle fixture has 30 rows; summary fixture computes batch speedup. |
+| 2026-06-11 10:30 | 2026-06-11 10:30 | `ANDROID_HOME=$HOME/Library/Android/sdk ANDROID_SDK_ROOT=$HOME/Library/Android/sdk ./gradlew :app:testDebugUnitTest` | pass | Java unit tests passed. |
+| 2026-06-11 10:31 | 2026-06-11 10:31 | `python3 scripts/fetch_table_reproduction_datasets.py --datasets aime26 --allow-missing` | pass | Fetched 30 MathArena AIME2026 rows into ignored host artifact cache. |
+| 2026-06-11 10:31 | 2026-06-11 10:31 | `python3 scripts/prepare_table_reproduction_bundle.py --suite avg1_diagnostic --model-id minicpm5-1b-thinking-q4 --datasets aime26` | pass | Created bundle `table_reproduction_avg1_diagnostic_aime26_minicpm5-1b-thinking-q4_1781145194`, `task_count=30`, `official_loop=false`, no `@Avg16` expansion. |
+| 2026-06-11 10:32 | 2026-06-11 10:33 | `MODEL_ID=minicpm5-1b-thinking-q4 ./scripts/fetch_gguf_model.sh` | pass | Downloaded and verified `MiniCPM5-1B-Q4_K_M.gguf`, size `688065920`, sha256 `81b64d05a23b17b34c475f42b3e72fbde62d4b92cc34541f7a8031d0752deafa`. |
+| 2026-06-11 10:34 | 2026-06-11 10:36 | `./scripts/bootstrap_mlc_python_env.sh` | pass | Created MLC Python venv under `artifacts/venv/mlc-python`. Pinned `apache-tvm-ffi==0.1.11` after discovering `0.1.12` is incompatible with this TVM checkout. |
+| 2026-06-11 10:37 | 2026-06-11 10:40 | `MLC_SMOKE_MODEL_ID=minicpm5-1b-thinking-mlc ./scripts/package_mlc_android.sh` | pass | Downloaded pinned MiniCPM5 MLC nested repo, JIT-compiled context `81920` / prefill chunk `128`, generated `model_lib=minicpm5_1b_q4f16_1_ctx80k_android`, synced MLC artifacts, and passed MLC validation. |
+| 2026-06-11 10:40 | 2026-06-11 10:40 | `MLC_SMOKE_MODEL_ID=minicpm5-1b-thinking-mlc python3 scripts/validate_mlc_android_package.py` | pass | Gradle-consumed MLC assets contain MiniCPM5 model entry and real ELF/JAR artifacts. |
+| 2026-06-11 10:40 | 2026-06-11 10:40 | `ANDROID_HOME=$HOME/Library/Android/sdk ANDROID_SDK_ROOT=$HOME/Library/Android/sdk ./gradlew :app:testDebugUnitTest :app:assembleDebug` | pass | Unit tests and debug APK build passed after MLC sync. |
+| 2026-06-11 10:41 | 2026-06-11 10:41 | `python3 scripts/validate_table_reproduction_manifest.py --strict-artifacts --datasets aime26 --dataset-artifacts-dir artifacts/table_reproduction/datasets` | pass | Strict artifact check passes for the in-scope AIME26 dataset. Full 13-dataset strict artifact validation remains out of scope for this Avg@1 run. |
+| 2026-06-11 10:45 | 2026-06-11 10:47 | `BACKEND_ID=llama_cpp MODEL_ID=minicpm5-1b-thinking-q4 ./scripts/stage_model_adb.sh` | pass | First staging showed the GGUF hash matched but root `manifest.json` was not present on device; `scripts/stage_model_adb.sh` now explicitly syncs root `manifest.json` before hash comparison. Rerun passed for GGUF and manifest. |
+| 2026-06-11 10:47 | 2026-06-11 10:48 | `BACKEND_ID=mlc MODEL_ID=minicpm5-1b-thinking-mlc HOST_MODEL_DIR=/Users/chenhaotian/.cache/mlc_llm/model_weights/hf/christophdet/MiniCPM5-1B-q4f16_1-MLC ./scripts/stage_model_adb.sh` | pass | Staged nested MLC repo to `files/models/mlc/minicpm5-1b-thinking-mlc`; device hashes match host for `.mlc_bypass_revision`, `mlc-chat-config.json`, tokenizer files, all 15 `params_shard_*.bin`, and the webgpu wasm artifact. |
+| 2026-06-11 10:48 | 2026-06-11 10:49 | `BUNDLE_DIR=.../table_reproduction_avg1_diagnostic_aime26_minicpm5-1b-thinking-q4_1781145194 ./scripts/stage_table_reproduction_bundle_adb.sh` | pass | Staged the 30-row AIME2026 Avg@1 diagnostic run bundle to `files/run_bundles/table_reproduction_avg1_diagnostic_aime26_minicpm5-1b-thinking-q4_1781145194`. |
+| 2026-06-11 10:49 | 2026-06-11 10:58 | `BUNDLE_DIR=... TIMEOUT_SECONDS=28800 ./scripts/run_aime26_avg1_batch_matrix_adb.sh` | running | Started matrix item 1: `backend=llama_cpp`, `model=minicpm5-1b-thinking-q4`, `batch_size=1`. The host poller was detached after confirming the app process remained active, CPU-bound, and stable. No report has been written yet because the Android runner writes report files only after the full 30-row run finishes. |
+
+Generated local artifacts:
+
+- AIME26 bundle: `artifacts/table_reproduction/run_bundles/table_reproduction_avg1_diagnostic_aime26_minicpm5-1b-thinking-q4_1781145194`
+- GGUF cache: `artifacts/models/gguf/minicpm5-1b-thinking-q4/MiniCPM5-1B-Q4_K_M.gguf`
+- MLC app config: `app/src/main/assets/mlc/mlc-app-config.json`
+- Installed APK SHA-256: `87dc30041d98ab4d222834d5e766384d2f51522cc3e26d6d63b486f7b360abd0`
+- Installed llama JNI SHA-256: `5c2d86b8df6aee74eadff148932545e91af9f1d7653570acb16064c5ff88974d`
+- Installed MLC/TVM runtime SHA-256: `58e9f5c5ce1dfb624d39a17a7b4cf06b050f8a9874bc489b47e7ef63173113ef`
+- Device fingerprint: `Xiaomi/pudding/pudding:16/BP2A.250605.031.A3/OS3.0.311.0.WPCCNXM:user/release-keys`
+- Installed package: `versionCode=1`, `versionName=0.1.0`, `primaryCpuAbi=arm64-v8a`
+
+Device matrix status:
+
+- Inputs are staged on device for both backends.
+- The first matrix run is active on device: `llama_cpp / minicpm5-1b-thinking-q4 / batch_size=1`.
+- At 2026-06-11 10:58 CST, process `com.xiaomi.llmbenchmark` was still active with about `1.7GB` PSS and about `4.4` CPU cores in use; no Java/native crash was observed and no report had been created yet.
+- After the first report is available, continue the remaining matrix with `BUNDLE_DIR=artifacts/table_reproduction/run_bundles/table_reproduction_avg1_diagnostic_aime26_minicpm5-1b-thinking-q4_1781145194 ./scripts/run_aime26_avg1_batch_matrix_adb.sh`.
+- Pull completed reports with `./scripts/pull_reports.sh`, then run `python3 scripts/summarize_aime26_avg1_batch_matrix.py <report_dir>...` to generate Avg@1, batch speedup, and KV-cache bucket summaries.
+
 ### Table Reproduction Implementation 2026-06-03
 
 | Start | End | Command | Result | Notes |

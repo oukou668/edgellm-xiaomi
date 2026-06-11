@@ -36,6 +36,10 @@ echo "[mlc-python] python=$PYTHON_BIN"
 MLC_PYTHON="$VENV_DIR/bin/python"
 "$MLC_PYTHON" -m pip install --upgrade pip "setuptools<82" wheel
 "$MLC_PYTHON" -m pip install -r "$MLC_SOURCE_DIR/python/requirements.txt"
+# The current checked-out TVM Python sources are not compatible with apache-tvm-ffi 0.1.12:
+# importing tvm fails while registering ir.DictAttrs. Pin the known-good FFI wheel for this
+# source checkout so packaging is reproducible from a clean venv.
+"$MLC_PYTHON" -m pip install --force-reinstall "apache-tvm-ffi==0.1.11"
 "$MLC_PYTHON" -m pip install cloudpickle psutil scipy tornado pytest
 (
   cd "$MLC_SOURCE_DIR/python"

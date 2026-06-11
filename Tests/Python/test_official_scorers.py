@@ -72,6 +72,42 @@ class OfficialScorerTests(unittest.TestCase):
     def test_prepare_full_gpqa_bundle_filters_to_198_rows(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out_root = pathlib.Path(tmp)
+            artifact_root = out_root / "datasets"
+            gpqa_dir = artifact_root / "gpqa_diamond"
+            gpqa_dir.mkdir(parents=True)
+            choices = ["alpha", "beta", "gamma", "delta"]
+            with (gpqa_dir / "samples.jsonl").open("w", encoding="utf-8") as handle:
+                for index in range(198):
+                    row = {
+                        "sample_id": f"gpqa_{index}",
+                        "prompt": "Question?\n\nChoices:\nA. alpha\nB. beta\nC. gamma\nD. delta\n\nAnswer with the option letter only.",
+                        "answer": "B",
+                        "harness_replay_doc": {
+                            "question": "Question?",
+                            "choices": choices,
+                            "options": choices,
+                            "answer": "(B)",
+                        },
+                        "official_eval_metadata": {
+                            "options": choices,
+                            "answer_letter": "B",
+                            "choice_order_id": choice_id(choices),
+                        },
+                    }
+                    handle.write(json.dumps(row) + "\n")
+            (gpqa_dir / "manifest.json").write_text(
+                json.dumps(
+                    {
+                        "dataset_id": "gpqa_diamond",
+                        "source_repo": "Idavidrein/gpqa",
+                        "source_revision": "633f5ee89ab8ad4522a9f850766b73f62147ffdd",
+                        "canonical_sample_count": 198,
+                        "fetched_sample_count": 198,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
             subprocess.run(
                 [
                     sys.executable,
@@ -84,6 +120,8 @@ class OfficialScorerTests(unittest.TestCase):
                     "gpqa_diamond",
                     "--out-root",
                     str(out_root),
+                    "--dataset-artifacts-dir",
+                    str(artifact_root),
                 ],
                 cwd=ROOT,
                 check=True,
@@ -91,7 +129,11 @@ class OfficialScorerTests(unittest.TestCase):
                 stderr=subprocess.PIPE,
                 text=True,
             )
-            bundle_dirs = [path for path in out_root.iterdir() if path.is_dir()]
+            bundle_dirs = [
+                path
+                for path in out_root.iterdir()
+                if path.is_dir() and path.name.startswith("table_reproduction_")
+            ]
             self.assertEqual(len(bundle_dirs), 1)
             bundle_dir = bundle_dirs[0]
             manifest = json.loads((bundle_dir / "bundle_manifest.json").read_text())

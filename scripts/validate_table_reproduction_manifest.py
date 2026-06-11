@@ -43,6 +43,18 @@ OFFICIAL_SCORER_DATASETS = {
 }
 
 
+def parse_dataset_filter(values):
+    if not values:
+        return None
+    parsed = set()
+    for value in values:
+        for part in str(value).split(","):
+            part = part.strip()
+            if part:
+                parsed.add(part)
+    return parsed or None
+
+
 def fail(message):
     print(f"ERROR: {message}", file=sys.stderr)
     return 1
@@ -60,7 +72,9 @@ def main():
         "--dataset-artifacts-dir",
         default=str(ROOT / "artifacts/table_reproduction/datasets"),
     )
+    parser.add_argument("--datasets", action="append", help="Dataset id or comma-separated ids for strict artifact checks.")
     args = parser.parse_args()
+    selected_datasets = parse_dataset_filter(args.datasets)
 
     models_root = json.loads(MODELS_PATH.read_text())
     suite = json.loads(SUITE_PATH.read_text())
@@ -159,7 +173,10 @@ def main():
 
     if args.strict_artifacts:
         artifact_root = pathlib.Path(args.dataset_artifacts_dir)
-        for dataset_id in TARGET_DATASETS:
+        strict_dataset_ids = selected_datasets or TARGET_DATASETS
+        unknown = sorted(strict_dataset_ids - TARGET_DATASETS)
+        require(not unknown, f"unknown strict artifact dataset id(s): {', '.join(unknown)}", errors)
+        for dataset_id in strict_dataset_ids:
             dataset_dir = artifact_root / dataset_id
             for name in ["manifest.json", "samples.jsonl"]:
                 require((dataset_dir / name).is_file(), f"missing dataset artifact {dataset_id}/{name}", errors)
@@ -172,6 +189,8 @@ def main():
     print(f"- models: {len(models)}")
     print(f"- datasets: {len(datasets)}")
     print(f"- strict_artifacts: {args.strict_artifacts}")
+    if selected_datasets:
+        print(f"- strict_artifact_datasets: {sorted(selected_datasets)}")
     return 0
 
 

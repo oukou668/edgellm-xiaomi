@@ -28,6 +28,18 @@ def dataset_url(path, **params):
     return f"https://datasets-server.huggingface.co/{path}?{query}"
 
 
+def parse_dataset_filter(values):
+    if not values:
+        return None
+    parsed = set()
+    for value in values:
+        for part in str(value).split(","):
+            part = part.strip()
+            if part:
+                parsed.add(part)
+    return parsed or None
+
+
 def splits_for(repo):
     return http_json(dataset_url("splits", dataset=repo)).get("splits", [])
 
@@ -461,14 +473,23 @@ def main():
     parser.add_argument("--raw-source-root", default=str(RAW_SOURCE_ROOT))
     parser.add_argument("--from-raw-sources", action="store_true")
     parser.add_argument("--allow-missing", action="store_true")
+    parser.add_argument("--datasets", action="append", help="Dataset id or comma-separated ids to fetch.")
     args = parser.parse_args()
 
     suite = json.loads(SUITE_PATH.read_text())
+    selected_datasets = parse_dataset_filter(args.datasets)
+    datasets = suite["datasets"]
+    if selected_datasets:
+        known = {dataset["dataset_id"] for dataset in datasets}
+        unknown = sorted(selected_datasets - known)
+        if unknown:
+            raise SystemExit(f"unknown dataset id(s): {', '.join(unknown)}")
+        datasets = [dataset for dataset in datasets if dataset["dataset_id"] in selected_datasets]
     out_root = pathlib.Path(args.out_root)
     raw_root = pathlib.Path(args.raw_source_root)
     blockers = []
     fetched = []
-    for dataset in suite["datasets"]:
+    for dataset in datasets:
         dataset_id = dataset["dataset_id"]
         repo = dataset["source_repo"]
         print(f"== {dataset_id}: {repo} ==")

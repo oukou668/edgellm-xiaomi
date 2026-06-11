@@ -24,9 +24,11 @@
       "bundle_weight": false
     },
     {
-      "model": "HF://PLACEHOLDER/MiniCPM5-1B-q4f16_1-MLC",
+      "model": "HF://christophdet/MiniCPM5-1B-q4f16_1-MLC",
       "model_id": "minicpm5-1b-thinking-mlc",
-      "model_lib": "PLACEHOLDER_minicpm5_q4f16_1_REPLACE_WITH_PACKAGING_HASH",
+      "hf_revision": "9fb405731c2cf886a32705ddf4785c6583896720",
+      "model_subdir": "MiniCPM5-1B-q4f16_1-MLC",
+      "model_lib": "minicpm5_1b_q4f16_1_ctx80k_android",
       "estimated_vram_bytes": 3000000000,
       "overrides": {
         "prefill_chunk_size": 128,

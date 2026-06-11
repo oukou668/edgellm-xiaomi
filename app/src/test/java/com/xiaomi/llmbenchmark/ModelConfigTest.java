@@ -15,12 +15,14 @@ public final class ModelConfigTest {
                         .put("model_id", "m")
                         .put("hf_repo", "repo/model")
                         .put("hf_revision", "rev")
+                        .put("model_subdir", "nested-model")
                         .put("artifact_filename", "model.gguf")
                         .put("artifact_sha256", "abc")
                         .put("artifact_size_bytes", 123L)
                         .put("quantization", "Q4_K_M");
         ModelConfig model = ModelConfig.fromJson(json);
         assertTrue(model.isLlamaCpp());
+        assertEquals("nested-model", model.modelSubdir);
         assertEquals("model.gguf", model.artifactFilename);
         assertEquals("abc", model.artifactSha256);
         assertEquals(123L, model.artifactSizeBytes);

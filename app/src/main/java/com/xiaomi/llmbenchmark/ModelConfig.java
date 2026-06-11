@@ -16,6 +16,7 @@ final class ModelConfig {
     final String hfRepo;
     final String hfRevision;
     final String mlcModelUrl;
+    final String modelSubdir;
     final String modelLib;
     final String artifactFilename;
     final String artifactSha256;
@@ -43,6 +44,7 @@ final class ModelConfig {
             String hfRepo,
             String hfRevision,
             String mlcModelUrl,
+            String modelSubdir,
             String modelLib,
             String artifactFilename,
             String artifactSha256,
@@ -68,6 +70,7 @@ final class ModelConfig {
         this.hfRepo = hfRepo == null ? "" : hfRepo;
         this.hfRevision = hfRevision == null ? "" : hfRevision;
         this.mlcModelUrl = mlcModelUrl;
+        this.modelSubdir = modelSubdir == null ? "" : modelSubdir;
         this.modelLib = modelLib;
         this.artifactFilename = artifactFilename == null ? "" : artifactFilename;
         this.artifactSha256 = artifactSha256 == null ? "" : artifactSha256;
@@ -109,6 +112,7 @@ final class ModelConfig {
                 hfRepo,
                 json.optString("hf_revision"),
                 mlcModelUrl,
+                json.optString("model_subdir"),
                 json.optString("model_lib"),
                 artifactFilename,
                 json.optString("artifact_sha256", json.optString("sha256")),
