@@ -155,6 +155,7 @@ final class MlcInferenceEngine implements InferenceEngine {
                     lastTokenNs = nowNs;
                     cumulativeGenerated += tokens;
                     text.append(delta.content);
+                    LiveStatus.appendToken(item.id, delta.content);
                 }
                 if (delta.finished) {
                     finished = true;
@@ -251,6 +252,7 @@ final class MlcInferenceEngine implements InferenceEngine {
                     lastTokenNs[i] = nowNs;
                     cumulativeGenerated[i] += tokens;
                     texts[i].append(delta.content);
+                    LiveStatus.appendToken(items.get(i).id, delta.content);
                 }
                 if (delta.finished) {
                     done[i] = true;

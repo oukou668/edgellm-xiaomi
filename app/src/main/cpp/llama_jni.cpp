@@ -38,6 +38,9 @@ static float g_top_p = 1.0f;
 static int g_top_k = 0;
 static uint32_t g_seed = 0;
 static std::string g_last_error;
+// Cached handle to LiveStatus.appendToken(String,String) for live UI streaming (optional).
+static jclass g_live_cls = nullptr;
+static jmethodID g_live_append = nullptr;
 
 static int64_t now_ms() {
     using namespace std::chrono;
@@ -75,6 +78,26 @@ static void log_callback(enum ggml_log_level level, const char *text, void *) {
 static void set_last_error(const std::string &message) {
     g_last_error = message;
     LOGE("%s", message.c_str());
+}
+
+// Push one freshly decoded piece to the Java LiveStatus so the UI can show generation in real
+// time. No-op if the class/method weren't found at init. Runs on the worker thread (env is valid).
+static void emit_token(JNIEnv *env, const std::string &item_id, const std::string &piece) {
+    if (env == nullptr || g_live_cls == nullptr || g_live_append == nullptr
+            || item_id.empty() || piece.empty()) {
+        return;
+    }
+    jstring jid = env->NewStringUTF(item_id.c_str());
+    jstring jpiece = env->NewStringUTF(piece.c_str());
+    if (jid != nullptr && jpiece != nullptr) {
+        env->CallStaticVoidMethod(g_live_cls, g_live_append, jid, jpiece);
+    }
+    if (jid != nullptr) {
+        env->DeleteLocalRef(jid);
+    }
+    if (jpiece != nullptr) {
+        env->DeleteLocalRef(jpiece);
+    }
 }
 
 static void release_context_resources() {
@@ -250,7 +273,9 @@ struct BatchResult {
 // Continuous parallel batching: prefill each prompt into its own sequence, then decode all active
 // sequences together (one llama_decode per step). nSeq=1 is the ordinary single-sequence path.
 static BatchResult run_batch(
+        JNIEnv *env,
         const std::vector<std::string> &prompts,
+        const std::vector<std::string> &item_ids,
         int per_seq_context,
         const std::string &kv_cache_type,
         int max_tokens,
@@ -370,6 +395,7 @@ static BatchResult run_batch(
             }
             texts[i] += piece;
             generated[i]++;
+            emit_token(env, i < static_cast<int>(item_ids.size()) ? item_ids[i] : std::string(), piece);
             if (texts[i].find("<|im_end|>") != std::string::npos
                     || texts[i].find("</s>") != std::string::npos) {
                 active[i] = false;
@@ -449,6 +475,20 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeInit(
     env->ReleaseStringUTFChars(native_lib_dir, path);
     llama_backend_init();
     LOGI("llama backend initialized");
+
+    // Cache the LiveStatus streaming hook (optional; generation works without it).
+    jclass cls = env->FindClass("com/xiaomi/llmbenchmark/LiveStatus");
+    if (cls != nullptr) {
+        g_live_cls = reinterpret_cast<jclass>(env->NewGlobalRef(cls));
+        g_live_append = env->GetStaticMethodID(
+                g_live_cls, "appendToken", "(Ljava/lang/String;Ljava/lang/String;)V");
+        env->DeleteLocalRef(cls);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        g_live_cls = nullptr;
+        g_live_append = nullptr;
+    }
 }
 
 extern "C" JNIEXPORT jint JNICALL
@@ -538,7 +578,8 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerate(
         jint top_k,
         jlong seed,
         jboolean thinking,
-        jlong timeout_ms) {
+        jlong timeout_ms,
+        jstring jitem_id) {
     const char *kv_chars = env->GetStringUTFChars(jkv_cache_type, nullptr);
     std::string kv_cache_type(kv_chars);
     env->ReleaseStringUTFChars(jkv_cache_type, kv_chars);
@@ -548,8 +589,18 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerate(
 
     std::vector<std::string> prompts;
     prompts.push_back(prompt);
+    std::vector<std::string> item_ids;
+    if (jitem_id != nullptr) {
+        const char *id_chars = env->GetStringUTFChars(jitem_id, nullptr);
+        item_ids.emplace_back(id_chars);
+        env->ReleaseStringUTFChars(jitem_id, id_chars);
+    } else {
+        item_ids.emplace_back("");
+    }
     BatchResult result = run_batch(
+            env,
             prompts,
+            item_ids,
             static_cast<int>(context_window),
             kv_cache_type,
             static_cast<int>(max_tokens),
@@ -575,7 +626,8 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerateBatch(
         jint top_k,
         jlong seed,
         jboolean thinking,
-        jlong timeout_ms) {
+        jlong timeout_ms,
+        jobjectArray jitem_ids) {
     const char *kv_chars = env->GetStringUTFChars(jkv_cache_type, nullptr);
     std::string kv_cache_type(kv_chars);
     env->ReleaseStringUTFChars(jkv_cache_type, kv_chars);
@@ -590,8 +642,24 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeGenerateBatch(
         env->DeleteLocalRef(element);
     }
 
+    std::vector<std::string> item_ids;
+    const jsize id_count = jitem_ids != nullptr ? env->GetArrayLength(jitem_ids) : 0;
+    for (jsize i = 0; i < id_count; i++) {
+        jstring element = static_cast<jstring>(env->GetObjectArrayElement(jitem_ids, i));
+        if (element != nullptr) {
+            const char *chars = env->GetStringUTFChars(element, nullptr);
+            item_ids.emplace_back(chars);
+            env->ReleaseStringUTFChars(element, chars);
+            env->DeleteLocalRef(element);
+        } else {
+            item_ids.emplace_back("");
+        }
+    }
+
     BatchResult result = run_batch(
+            env,
             prompts,
+            item_ids,
             static_cast<int>(per_seq_context),
             kv_cache_type,
             static_cast<int>(max_tokens),

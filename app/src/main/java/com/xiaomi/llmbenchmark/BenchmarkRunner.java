@@ -42,6 +42,17 @@ final class BenchmarkRunner {
                         + ", batch_size="
                         + options.batchSize);
 
+        LiveStatus.get()
+                .startJob(
+                        options.backendId,
+                        model.modelId,
+                        model.displayName,
+                        benchmark.benchmarkId,
+                        benchmark.displayName,
+                        options.batchSize,
+                        benchmark.items.size(),
+                        options.repeatCount);
+
         List<JSONObject> batchMetrics = new ArrayList<>();
         File modelDir;
         InferenceEngine engine;
@@ -63,6 +74,7 @@ final class BenchmarkRunner {
         }
         long loadStartNs = System.nanoTime();
         monitor.setPhase("model_load", "");
+        LiveStatus.get().setPhase("model_load");
         progress.onProgress("Loading " + model.backendId + " engine: " + model.modelId);
         List<BenchmarkItemResult> results = new ArrayList<>();
         List<BenchmarkItemResult> warmupResults = new ArrayList<>();
@@ -76,6 +88,8 @@ final class BenchmarkRunner {
             String message = loadError.getClass().getSimpleName() + ": " + loadError.getMessage();
             progress.onProgress("Model load failed: " + message);
             monitor.setPhase("model_load_failed", "");
+            LiveStatus.get().setPhase("model_load_failed");
+            LiveStatus.get().finishJob();
             for (BenchmarkItem item : benchmark.items) {
                 results.add(
                         failedResult(
@@ -125,6 +139,13 @@ final class BenchmarkRunner {
                 if (options.isBatched()) {
                     for (int start = 0; start < benchmark.items.size(); start += options.batchSize) {
                         List<BenchmarkItem> chunk = chunkOf(benchmark.items, start, options.batchSize);
+                        if (!chunk.isEmpty()) {
+                            BenchmarkItem head = chunk.get(0);
+                            LiveStatus.get()
+                                    .startItem(
+                                            start + 1, benchmark.items.size(), repeat + 1, head.id,
+                                            head.displayPrompt(), head.expectedAnswer);
+                        }
                         progress.onProgress(
                                 "Repeat " + (repeat + 1) + "/" + options.repeatCount + " batch@" + start
                                         + " size=" + chunk.size());
@@ -138,6 +159,10 @@ final class BenchmarkRunner {
                 } else {
                     for (int i = 0; i < benchmark.items.size(); i++) {
                         BenchmarkItem item = benchmark.items.get(i);
+                        LiveStatus.get()
+                                .startItem(
+                                        i + 1, benchmark.items.size(), repeat + 1, item.id,
+                                        item.displayPrompt(), item.expectedAnswer);
                         progress.onProgress(
                                 "Running repeat " + (repeat + 1) + "/" + options.repeatCount + " " + (i + 1) + "/"
                                         + benchmark.items.size() + ": " + item.id);
@@ -149,6 +174,7 @@ final class BenchmarkRunner {
             monitor.setPhase("unload", "");
             engine.unload();
             monitor.close();
+            LiveStatus.get().finishJob();
         }
 
         return new BenchmarkRunReport(

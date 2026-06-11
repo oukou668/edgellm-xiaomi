@@ -110,7 +110,8 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                             params.topK,
                             params.seed,
                             params.thinkingEnabled,
-                            PER_SAMPLE_TIMEOUT_MS);
+                            PER_SAMPLE_TIMEOUT_MS,
+                            item.id);
         }
         JSONObject json = new JSONObject(rawJson);
         return new GenerationResult(
@@ -138,8 +139,10 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         int contextWindow = head.contextWindowSize > 0 ? head.contextWindowSize : model.contextWindow;
         String kvCacheType = contextWindow > 32768 ? "q4_0" : "f16";
         String[] prompts = new String[items.size()];
+        String[] itemIds = new String[items.size()];
         for (int i = 0; i < items.size(); i++) {
             prompts[i] = items.get(i).displayPrompt();
+            itemIds[i] = items.get(i).id;
         }
         String rawJson;
         synchronized (lock) {
@@ -154,7 +157,8 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
                             head.topK,
                             head.seed,
                             head.thinkingEnabled,
-                            PER_SAMPLE_TIMEOUT_MS);
+                            PER_SAMPLE_TIMEOUT_MS,
+                            itemIds);
         }
         JSONObject json = new JSONObject(rawJson);
         long decodeWall = json.optLong("aggregate_decode_latency_ms", -1L);
@@ -229,7 +233,8 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             int topK,
             long seed,
             boolean thinking,
-            long timeoutMs);
+            long timeoutMs,
+            String itemId);
 
     private static native String nativeGenerateBatch(
             String[] prompts,
@@ -241,7 +246,8 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
             int topK,
             long seed,
             boolean thinking,
-            long timeoutMs);
+            long timeoutMs,
+            String[] itemIds);
 
     private static native String nativeSystemInfo();
 
