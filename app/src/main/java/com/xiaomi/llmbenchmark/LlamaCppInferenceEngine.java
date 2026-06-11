@@ -52,6 +52,7 @@ final class LlamaCppInferenceEngine implements InferenceEngine {
         details.put("default_top_p", String.valueOf(model.defaultParams.topP));
         details.put("default_thinking_enabled", String.valueOf(model.defaultParams.thinkingEnabled));
         details.put("chat_template", "official_gguf_template");
+        details.put("gpu_offload", "n_gpu_layers=all (GPU backend per build; see system_info for active device)");
         String loadKey =
                 gguf.getAbsolutePath()
                         + "|threads="

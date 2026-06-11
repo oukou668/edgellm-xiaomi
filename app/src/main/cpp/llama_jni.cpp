@@ -33,6 +33,10 @@ static int g_context_window = 0;  // total n_ctx of the live context (per-seq co
 static int g_n_seq_max = 0;
 static std::string g_kv_cache_type = "f16";
 static int g_threads = 2;
+// Number of transformer layers to offload to the GPU backend. 999 = offload all (llama.cpp clamps
+// to the model's actual layer count). Requires a GPU ggml backend in the build (-DGGML_VULKAN=ON or
+// -DGGML_OPENCL=ON); if none is present llama.cpp transparently falls back to CPU.
+static int g_n_gpu_layers = 999;
 static float g_temperature = 0.0f;
 static float g_top_p = 1.0f;
 static int g_top_k = 0;
@@ -518,8 +522,10 @@ Java_com_xiaomi_llmbenchmark_LlamaCppInferenceEngine_nativeLoad(
         env->ReleaseStringUTFChars(model_path, path);
         return 10;
     }
-    LOGI("loading GGUF: %s size=%lld threads=%d", path, static_cast<long long>(model_stat.st_size), g_threads);
+    LOGI("loading GGUF: %s size=%lld threads=%d gpu_layers=%d",
+         path, static_cast<long long>(model_stat.st_size), g_threads, g_n_gpu_layers);
     llama_model_params model_params = llama_model_default_params();
+    model_params.n_gpu_layers = g_n_gpu_layers;  // offload to GPU backend if one is loaded
     g_model = llama_model_load_from_file(path, model_params);
     std::string model_path_copy(path);
     env->ReleaseStringUTFChars(model_path, path);

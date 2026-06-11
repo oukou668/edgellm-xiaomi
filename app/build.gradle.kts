@@ -36,6 +36,10 @@ val llamaCppRepo = providers.gradleProperty("llamaCppDir")
 val mlcLlmRepo = providers.gradleProperty("mlcLlmSourceDir")
     .orElse("/Users/chenhaotian/code/iPhone/mlc-llm")
     .get()
+// GPU backend for the llama.cpp engine. "vulkan" (default, NDK-native, works on Adreno),
+// "opencl" (Adreno-tuned; needs OpenCL headers + ICD loader on the build host), or "cpu"/"none"
+// to disable GPU offload. Override with -PllamaGpuBackend=opencl.
+val llamaGpuBackend = providers.gradleProperty("llamaGpuBackend").orElse("vulkan").get().lowercase()
 
 android {
     namespace = "com.xiaomi.llmbenchmark"
@@ -82,6 +86,13 @@ android {
                     "-DGGML_LLAMAFILE=OFF",
                     "-DLLAMA_CPP_DIR=${providers.gradleProperty("llamaCppDir").orElse("/Users/chenhaotian/code/llama_benchmark/third_party/llama.cpp").get()}"
                 )
+                // Enable a GPU ggml backend (loaded at runtime via GGML_BACKEND_DL). Layers are
+                // offloaded to the GPU at model load (n_gpu_layers in llama_jni.cpp).
+                arguments += when (llamaGpuBackend) {
+                    "vulkan" -> listOf("-DGGML_VULKAN=ON")
+                    "opencl" -> listOf("-DGGML_OPENCL=ON", "-DGGML_OPENCL_USE_ADRENO_KERNELS=ON")
+                    else -> emptyList()
+                }
             }
         }
     }
